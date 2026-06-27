@@ -1,5 +1,5 @@
 "use client";
-// app/profile/page.js - FIXED AUTH HANDLING
+// app/profile/page.js - COMPLETE FIXED VERSION
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -16,6 +16,7 @@ import PostViewer from "./components/PostViewer";
 import ImageEditorModal from "./components/ImageEditorModal";
 import MediaUploader from "./components/MediaUploader";
 import MusicPicker from "./components/MusicPicker";
+
 
 // Icons
 import {
@@ -60,7 +61,8 @@ export default function ProfilePage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState('');
-
+  // Add this line with your other state declarations
+  const [videoDuration, setVideoDuration] = useState(null);
   const SKILL_ICONS = {
     "Web Development": Code,
     "UI/UX Design": Palette,
@@ -78,7 +80,6 @@ export default function ProfilePage() {
     Leadership: Users,
   };
 
-  // ✅ IMPROVED AUTH CHECK WITH SESSION HANDLING
   useEffect(() => {
     let mounted = true;
 
@@ -87,9 +88,8 @@ export default function ProfilePage() {
         setLoading(true);
         console.log('🔍 Checking authentication...');
 
-        // First check if we have a session
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        
+
         if (sessionError) {
           console.error("❌ Session error:", sessionError);
           setAuthError(sessionError.message);
@@ -104,13 +104,13 @@ export default function ProfilePage() {
         }
 
         console.log('✅ Session found:', session.user.id);
-        
+
         if (mounted) {
           setUser(session.user);
           await loadProfile(session.user.id);
           await loadPosts(session.user.id);
         }
-        
+
       } catch (error) {
         console.error("❌ Auth initialization error:", error);
         setAuthError(error.message);
@@ -124,11 +124,10 @@ export default function ProfilePage() {
 
     initializeAuth();
 
-    // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('🔄 Auth state changed:', event);
-        
+
         if (event === 'SIGNED_OUT') {
           router.push('/');
         } else if (event === 'SIGNED_IN' && session) {
@@ -150,7 +149,7 @@ export default function ProfilePage() {
   const loadProfile = async (userId) => {
     try {
       console.log('📥 Loading profile for user:', userId);
-      
+
       const { data, error } = await supabase
         .from("profile_user")
         .select("*")
@@ -161,12 +160,11 @@ export default function ProfilePage() {
         console.error("❌ Profile load error:", error);
         throw error;
       }
-      
+
       console.log('✅ Profile loaded:', data);
       setProfile(data);
     } catch (error) {
       console.error("❌ Error loading profile:", error);
-      // If profile doesn't exist, redirect to onboarding
       if (error.code === 'PGRST116') {
         console.log('📝 No profile found, redirecting to onboarding');
         router.push('/onboarding/interests?mode=new');
@@ -177,15 +175,15 @@ export default function ProfilePage() {
   const loadPosts = async (userId) => {
     try {
       console.log('📥 Loading posts for user:', userId);
-      
+
       const { data, error } = await supabase
         .from("post")
         .select("*")
         .eq("user_id", userId)
         .order("created_at", { ascending: false });
-      
+
       if (error) throw error;
-      
+
       console.log('✅ Posts loaded:', data?.length || 0);
       setPosts(data || []);
     } catch (error) {
@@ -200,25 +198,33 @@ export default function ProfilePage() {
 
   const handleMediaSelect = async (file, type) => {
     setCurrentMediaType(type);
-    
+
     if (type === 'image') {
       setCurrentImage(file);
       setCurrentImageType('post');
+      setVideoDuration(null);
       setMediaUploaderOpen(false);
       setCropperOpen(true);
     } else if (type === 'video') {
       setCurrentVideo(file);
       setCurrentImageType('post');
-      
+
       try {
         setUploadStatus('Generating thumbnail...');
+
+        // ✅ Get and store video duration as NUMBER (will be floored to INTEGER later)
+        const duration = await getVideoDuration(file);
+        setVideoDuration(duration);
+        console.log('📹 Video duration detected:', duration, 'seconds');
+
         const thumbnailBlob = await generateThumbnail(file);
         setVideoThumbnail(thumbnailBlob);
         setMediaUploaderOpen(false);
         setEditorOpen(true);
       } catch (error) {
-        console.error('Failed to generate thumbnail:', error);
+        console.error('Failed to process video:', error);
         alert('Failed to process video. Please try again.');
+        setVideoDuration(null);
       }
     }
   };
@@ -236,6 +242,7 @@ export default function ProfilePage() {
     setEditorOpen(true);
   };
 
+
   const saveImage = async (blob, caption, description) => {
     if (!user) return;
 
@@ -244,48 +251,97 @@ export default function ProfilePage() {
       setUploadProgress(0);
 
       if (currentImageType === "post") {
-        // Upload image
         setUploadStatus('Uploading image...');
         setUploadProgress(20);
-        
+
         const imageResult = await uploadImage(blob, user.id, 'post-images', 'post');
         setUploadProgress(50);
-
-        // Upload music if selected
-        let musicUrl = null;
-        if (selectedMusic) {
-          setUploadStatus('Uploading music...');
-          const musicPath = `${user.id}/music-${Date.now()}.${selectedMusic.file.name.split('.').pop()}`;
-          await supabase.storage
-            .from("post-music")
-            .upload(musicPath, selectedMusic.file, { upsert: true });
-          const musicData = supabase.storage.from("post-music").getPublicUrl(musicPath);
-          musicUrl = musicData.data.publicUrl;
-        }
 
         setUploadProgress(80);
         setUploadStatus('Creating post...');
 
-        // Insert post
-        const { error: insertError } = await supabase.from("post").insert({
+        const postData = {
           user_id: user.id,
-          content: caption || '',
           caption: caption || '',
+          content: description || '',
           image_url: imageResult.url,
           media_urls: [imageResult.url],
-        });
+          media_type: 'image',
+        };
 
-        if (insertError) throw insertError;
+        // ✅ CRITICAL FIX: Convert music data to INTEGERS for database
+        if (selectedMusic) {
+          console.log('🎵 Processing music for image post:', selectedMusic);
+
+          // ✅ Convert to INTEGER (music_duration column type)
+          const musicDuration = Math.floor(
+            Number(selectedMusic.duration || selectedMusic.clipDuration) || 15
+          );
+
+          // ✅ Convert to INTEGER (music_start_time column type)
+          const musicStartTime = Math.floor(
+            Number(selectedMusic.startTime) || 0
+          );
+
+          // ✅ Calculate end time as INTEGER
+          const musicEndTime = musicStartTime + musicDuration;
+
+          // Validate
+          if (!Number.isFinite(musicDuration) || musicDuration <= 0) {
+            console.error('❌ Invalid music duration:', musicDuration);
+            throw new Error('Invalid music duration');
+          }
+
+          if (!Number.isFinite(musicStartTime) || musicStartTime < 0) {
+            console.error('❌ Invalid music start time:', musicStartTime);
+            throw new Error('Invalid music start time');
+          }
+
+          console.log('✅ Music data for database (INTEGERS):', {
+            musicDuration,
+            musicStartTime,
+            musicEndTime,
+            types: {
+              duration: typeof musicDuration,
+              startTime: typeof musicStartTime,
+              endTime: typeof musicEndTime
+            }
+          });
+
+          // Store as INTEGERS matching database schema
+          postData.music_url = selectedMusic.musicUrl;
+          postData.music_title = selectedMusic.title || 'Unknown';
+          postData.music_artist = selectedMusic.artist || 'Unknown Artist';
+          postData.music_duration = musicDuration; // INTEGER
+          postData.music_start_time = musicStartTime; // INTEGER
+          postData.music_end_time = musicEndTime; // INTEGER - CRITICAL FOR SYNC
+        }
+
+        console.log('📝 Final post data for image:', postData);
+
+        const { data: insertedPost, error: insertError } = await supabase
+          .from("post")
+          .insert(postData)
+          .select()
+          .single();
+
+        if (insertError) {
+          console.error('❌ Database insert error:', insertError);
+          throw new Error(`Database error: ${insertError.message}`);
+        }
+
+        console.log('✅ Image post created:', insertedPost.id);
 
         setUploadProgress(100);
         await loadPosts(user.id);
         setSelectedMusic(null);
+        setVideoDuration(null);
 
       } else {
-        // Profile/cover pic upload
+        // Profile/cover picture update
         setUploadStatus('Uploading profile picture...');
         const result = await uploadImage(blob, user.id, 'profile-pics', currentImageType === 'profile_pic' ? 'profile' : 'cover');
-        
+
         setUploadProgress(50);
         setUploadStatus('Updating profile...');
 
@@ -293,13 +349,17 @@ export default function ProfilePage() {
         await supabase.from("profile_user")
           .update({ [updateField]: result.url })
           .eq("id", user.id);
-        
+
         setUploadProgress(100);
         await loadProfile(user.id);
       }
-      
+
       setCroppedImageBlob(null);
-      console.log('✅ Image saved successfully');
+      setEditorOpen(false);
+      setCurrentVideo(null);
+      setVideoThumbnail(null);
+      setSelectedMusic(null);
+      setVideoDuration(null);
 
     } catch (error) {
       console.error("❌ Error saving image:", error);
@@ -316,76 +376,104 @@ export default function ProfilePage() {
 
     try {
       setIsUploading(true);
-      setUploadProgress(0);
-
       setUploadStatus('Uploading video...');
-      setUploadProgress(10);
-      
+
       const videoResult = await uploadVideo(currentVideo, user.id, (progress) => {
         setUploadProgress(10 + (progress * 0.4));
       });
 
-      console.log('✅ Video uploaded:', videoResult.url);
-      setUploadProgress(50);
-
-      setUploadStatus('Uploading thumbnail...');
       const thumbnailResult = await uploadImage(thumbnailBlob, user.id, 'video-thumbnails', 'thumb');
-      
-      console.log('✅ Thumbnail uploaded:', thumbnailResult.url);
-      setUploadProgress(65);
 
-      let musicUrl = null;
-      if (selectedMusic) {
-        setUploadStatus('Uploading music...');
-        const musicPath = `${user.id}/music-${Date.now()}.${selectedMusic.file.name.split('.').pop()}`;
-        await supabase.storage
-          .from("post-music")
-          .upload(musicPath, selectedMusic.file, { upsert: true });
-        const musicData = supabase.storage.from("post-music").getPublicUrl(musicPath);
-        musicUrl = musicData.data.publicUrl;
-      }
-
-      setUploadProgress(75);
-
-      setUploadStatus('Processing video metadata...');
-      const duration = await getVideoDuration(currentVideo);
-      setUploadProgress(85);
-
-      setUploadStatus('Creating post...');
-      const { error: insertError } = await supabase.from("post").insert({
+      const postData = {
         user_id: user.id,
-        content: caption || '',
         caption: caption || '',
+        content: description || '',
         image_url: thumbnailResult.url,
         media_urls: [videoResult.url],
-      });
+        media_type: 'video',
+        video_thumbnail: thumbnailResult.url,
+      };
 
-      if (insertError) {
-        console.error('❌ Insert error:', insertError);
-        throw insertError;
+      // ✅ CRITICAL FIX: Convert music data to INTEGERS for database
+      if (selectedMusic) {
+        console.log('🎵 Processing music for video post:', selectedMusic);
+
+        // ✅ Convert to INTEGER
+        const musicDuration = Math.floor(
+          Number(selectedMusic.duration || selectedMusic.clipDuration) || 15
+        );
+
+        // ✅ Convert to INTEGER
+        const musicStartTime = Math.floor(
+          Number(selectedMusic.startTime) || 0
+        );
+
+        // ✅ Calculate end time as INTEGER
+        const musicEndTime = musicStartTime + musicDuration;
+
+        // Validate
+        if (!Number.isFinite(musicDuration) || musicDuration <= 0) {
+          console.error('❌ Invalid music duration:', musicDuration);
+          throw new Error('Invalid music duration');
+        }
+
+        if (!Number.isFinite(musicStartTime) || musicStartTime < 0) {
+          console.error('❌ Invalid music start time:', musicStartTime);
+          throw new Error('Invalid music start time');
+        }
+
+        console.log('✅ Music data for database (INTEGERS):', {
+          musicDuration,
+          musicStartTime,
+          musicEndTime,
+          types: {
+            duration: typeof musicDuration,
+            startTime: typeof musicStartTime,
+            endTime: typeof musicEndTime
+          }
+        });
+
+        postData.music_url = selectedMusic.musicUrl;
+        postData.music_title = selectedMusic.title || 'Unknown';
+        postData.music_artist = selectedMusic.artist || 'Unknown Artist';
+        postData.music_duration = musicDuration; // INTEGER
+        postData.music_start_time = musicStartTime; // INTEGER
+        postData.music_end_time = musicEndTime; // INTEGER - CRITICAL FOR SYNC
       }
 
-      setUploadProgress(100);
-      setUploadStatus('Complete!');
+      console.log('📝 Final post data for video:', postData);
 
+      const { data: insertedPost, error: insertError } = await supabase
+        .from("post")
+        .insert(postData)
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error('❌ Database insert error:', insertError);
+        throw new Error(`Database error: ${insertError.message}`);
+      }
+
+      console.log('✅ Video post created:', insertedPost.id);
+
+      setUploadProgress(100);
       await loadPosts(user.id);
       setCurrentVideo(null);
       setVideoThumbnail(null);
       setSelectedMusic(null);
-
-      console.log('✅ Video post created successfully!');
+      setVideoDuration(null);
+      setEditorOpen(false);
 
     } catch (error) {
       console.error("❌ Error saving video:", error);
       alert(`Failed to upload video: ${error.message}`);
     } finally {
-      setTimeout(() => {
-        setIsUploading(false);
-        setUploadProgress(0);
-        setUploadStatus('');
-      }, 1000);
+      setIsUploading(false);
+      setUploadProgress(0);
+      setUploadStatus('');
     }
   };
+
 
   const handleEditorSave = async (finalBlob, caption, description) => {
     if (currentMediaType === 'video') {
@@ -423,7 +511,6 @@ export default function ProfilePage() {
     }
   };
 
-  // Show loading state
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-[#e9eaec]">
@@ -435,7 +522,6 @@ export default function ProfilePage() {
     );
   }
 
-  // Show error state
   if (authError) {
     return (
       <div className="flex items-center justify-center h-screen bg-[#e9eaec]">
@@ -454,7 +540,6 @@ export default function ProfilePage() {
     );
   }
 
-  // Show "no profile" state
   if (!profile) {
     return (
       <div className="flex items-center justify-center h-screen bg-[#e9eaec]">
@@ -490,10 +575,10 @@ export default function ProfilePage() {
         <ProfileTabs activeTab={activeTab} setActiveTab={setActiveTab} />
 
         {activeTab === "posts" && (
-          <PostGrid 
-            posts={posts} 
+          <PostGrid
+            posts={posts}
             openMediaUploader={handleOpenMediaUploader}
-            openViewer={openViewer} 
+            openViewer={openViewer}
           />
         )}
       </div>
@@ -506,14 +591,14 @@ export default function ProfilePage() {
               {currentMediaType === 'video' ? 'Uploading Video' : 'Uploading Image'}
             </h3>
             <p className="text-sm text-gray-600 mb-6">{uploadStatus}</p>
-            
+
             <div className="w-full bg-gray-200 rounded-full h-3 mb-3 overflow-hidden">
-              <div 
+              <div
                 className="bg-gradient-to-r from-blue-500 to-purple-600 h-3 rounded-full transition-all duration-300 ease-out"
                 style={{ width: `${uploadProgress}%` }}
               ></div>
             </div>
-            
+
             <div className="flex justify-between items-center">
               <p className="text-sm font-semibold text-gray-700">{uploadProgress}%</p>
               {uploadProgress === 100 && (
@@ -570,6 +655,7 @@ export default function ProfilePage() {
           onClose={() => setMusicPickerOpen(false)}
           onSelectMusic={setSelectedMusic}
           currentMusic={selectedMusic}
+          videoDuration={videoDuration}  // ✅ ADD THIS LINE
         />
       )}
 

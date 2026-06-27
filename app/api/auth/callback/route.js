@@ -1,4 +1,4 @@
-// app/auth/callback/route.js - FIXED VERSION
+// app/auth/callback/route.js - WITH OTP PASSWORD RESET SUPPORT
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
@@ -6,8 +6,15 @@ import { NextResponse } from 'next/server';
 export async function GET(request) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get('code');
+  const type = requestUrl.searchParams.get('type');
+  const token_hash = requestUrl.searchParams.get('token_hash');
+  const next = requestUrl.searchParams.get('next') || '/';
 
-  console.log('🔄 Auth callback triggered with code:', code ? 'present' : 'missing');
+  console.log('🔄 Auth callback triggered:', { 
+    code: !!code, 
+    type, 
+    token_hash: !!token_hash 
+  });
 
   if (code) {
     try {
@@ -19,12 +26,23 @@ export async function GET(request) {
       
       if (error) {
         console.error('❌ Error exchanging code:', error);
-        return NextResponse.redirect(new URL('/?error=confirmation_failed', requestUrl.origin));
+        return NextResponse.redirect(
+          new URL('/?error=confirmation_failed', requestUrl.origin)
+        );
       }
 
       console.log('✅ Code exchanged successfully for user:', data.user?.id);
 
-      // Check if profile exists to determine if user is new
+      // Handle different callback types
+      if (type === 'recovery') {
+        // Password reset callback - user clicked email link
+        console.log('🔑 Password recovery flow detected');
+        return NextResponse.redirect(
+          new URL('/auth/reset-password', requestUrl.origin)
+        );
+      }
+
+      // Regular email confirmation - check if profile exists
       const { data: profile, error: profileError } = await supabase
         .from('profile_user')
         .select('skills_offered, skills_wanted')
@@ -35,19 +53,25 @@ export async function GET(request) {
         console.error('❌ Error checking profile:', profileError);
       }
 
-      // If no profile or profile is incomplete (no skills set), go to onboarding
+      // Determine where to redirect based on profile completeness
       if (!profile || !profile.skills_offered || profile.skills_offered.length === 0) {
-        console.log('📝 New user detected, redirecting to onboarding');
-        return NextResponse.redirect(new URL('/onboarding/interests?mode=new', requestUrl.origin));
+        console.log('📝 New/incomplete profile, redirecting to onboarding');
+        return NextResponse.redirect(
+          new URL('/onboarding/interests?mode=new', requestUrl.origin)
+        );
       }
 
-      // Existing user with complete profile, go to profile page
-      console.log('✅ Existing user, redirecting to profile');
-      return NextResponse.redirect(new URL('/profile', requestUrl.origin));
+      // Existing complete profile
+      console.log('✅ Complete profile found, redirecting to profile page');
+      return NextResponse.redirect(
+        new URL('/profile', requestUrl.origin)
+      );
 
     } catch (error) {
       console.error('❌ Callback error:', error);
-      return NextResponse.redirect(new URL('/?error=callback_error', requestUrl.origin));
+      return NextResponse.redirect(
+        new URL('/?error=callback_error', requestUrl.origin)
+      );
     }
   }
 

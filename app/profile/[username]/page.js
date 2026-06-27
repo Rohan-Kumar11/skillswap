@@ -24,7 +24,7 @@ export default function OtherUserProfile() {
   const [messageModalOpen, setMessageModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('posts');
   const [existingConversation, setExistingConversation] = useState(null);
-  const [messageRequest, setMessageRequest] = useState(null);
+  const [canSendRequest, setCanSendRequest] = useState(true);
 
   // Post viewer states
   const [viewerOpen, setViewerOpen] = useState(false);
@@ -34,7 +34,6 @@ export default function OtherUserProfile() {
   const [likedPosts, setLikedPosts] = useState(new Set());
   const [postLikeCounts, setPostLikeCounts] = useState({});
   const [postCommentCounts, setPostCommentCounts] = useState({});
-  const [isLiking, setIsLiking] = useState(false);
 
   const SKILL_ICONS = {
     "Web Development": Code,
@@ -53,7 +52,7 @@ export default function OtherUserProfile() {
     Leadership: Users,
   };
 
-  // Load post interactions when posts and user are ready
+  // Load post interactions
   useEffect(() => {
     if (posts.length > 0 && currentUser) {
       loadPostInteractions();
@@ -64,7 +63,6 @@ export default function OtherUserProfile() {
     try {
       if (!currentUser) return;
 
-      // Load user's likes
       const { data: likesData } = await supabase
         .from('post_likes')
         .select('post_id')
@@ -75,7 +73,6 @@ export default function OtherUserProfile() {
         setLikedPosts(new Set(likesData.map(like => like.post_id)));
       }
 
-      // Load counts for all posts
       const likeCounts = {};
       const commentCounts = {};
 
@@ -115,7 +112,6 @@ export default function OtherUserProfile() {
           url: shareUrl
         });
         
-        // Record the share
         if (currentUser) {
           await supabase
             .from('post_shares')
@@ -126,11 +122,9 @@ export default function OtherUserProfile() {
             });
         }
       } else {
-        // Fallback: copy link
         await navigator.clipboard.writeText(shareUrl);
         alert('Link copied to clipboard!');
         
-        // Record the share
         if (currentUser) {
           await supabase
             .from('post_shares')
@@ -153,7 +147,6 @@ export default function OtherUserProfile() {
       if (user) {
         setCurrentUser(user);
 
-        // Check if viewing own profile
         if (profile && profile.id === user.id) {
           router.push('/profile');
         }
@@ -172,11 +165,10 @@ export default function OtherUserProfile() {
     }
   }, [username]);
 
-  // Check for existing conversation or request
+  // ✨ NEW: Check request status when profile and user are ready
   useEffect(() => {
     if (currentUser && profile) {
-      checkExistingConversation();
-      checkMessageRequest();
+      checkRequestStatus();
     }
   }, [currentUser, profile]);
 
@@ -211,43 +203,56 @@ export default function OtherUserProfile() {
     }
   };
 
-  const checkExistingConversation = async () => {
+  // ✨ NEW: Smart request status check
+  const checkRequestStatus = async () => {
     try {
-      const { data } = await supabase
-        .from('conversations')
-        .select('id, type')
-        .or(`and(user1_id.eq.${currentUser.id},user2_id.eq.${profile.id}),and(user1_id.eq.${profile.id},user2_id.eq.${currentUser.id})`)
-        .single();
+      console.log('🔍 Checking request status...');
+      console.log('Current user:', currentUser.id);
+      console.log('Profile user:', profile.id);
 
-      if (data) {
-        setExistingConversation(data);
+      // Use the new RPC function to check
+      const { data, error } = await supabase.rpc('can_send_request', {
+        p_sender_id: currentUser.id,
+        p_receiver_id: profile.id
+      });
+
+      if (error) {
+        console.error('Error checking request status:', error);
+        setCanSendRequest(true); // Default to allow
+        setExistingConversation(null);
+        return;
       }
+
+      console.log('✅ Request status:', data);
+
+      if (data.can_send) {
+        // User can send new request
+        setCanSendRequest(true);
+        setExistingConversation(null);
+        console.log('✅ User can send new request');
+      } else if (data.reason === 'existing_conversation') {
+        // Active conversation exists
+        setCanSendRequest(false);
+        setExistingConversation({ 
+          id: data.conversation_id,
+          exists: true 
+        });
+        console.log('✅ Existing conversation found:', data.conversation_id);
+      }
+
     } catch (error) {
+      console.error('Error in checkRequestStatus:', error);
+      setCanSendRequest(true);
       setExistingConversation(null);
     }
   };
 
-  const checkMessageRequest = async () => {
-    try {
-      const { data } = await supabase
-        .from('message_requests')
-        .select('*')
-        .eq('sender_id', currentUser.id)
-        .eq('receiver_id', profile.id)
-        .single();
-
-      if (data) {
-        setMessageRequest(data);
-      }
-    } catch (error) {
-      setMessageRequest(null);
-    }
-  };
-
   const handleMessageClick = () => {
-    if (existingConversation) {
+    if (existingConversation?.exists) {
+      // Go to messages page
       router.push('/messages');
     } else {
+      // Open modal to send new request
       setMessageModalOpen(true);
     }
   };
@@ -255,6 +260,12 @@ export default function OtherUserProfile() {
   const openViewer = (index) => {
     setSelectedPostIndex(index);
     setViewerOpen(true);
+  };
+
+  // ✨ NEW: Refresh after sending request
+  const handleRequestSent = () => {
+    setMessageModalOpen(false);
+    checkRequestStatus(); // Refresh button state
   };
 
   if (loading) {
@@ -297,14 +308,13 @@ export default function OtherUserProfile() {
       <div className="ml-64 flex-1 p-8 pb-20">
         {/* COVER IMAGE */}
         <div className="w-full h-40 bg-gray-400 rounded-2xl mb-6 relative overflow-hidden">
-          {profile.cover_pic && (
+          {profile.cover_pic ? (
             <img
               src={profile.cover_pic}
               className="absolute inset-0 w-full h-full object-cover"
               alt="cover"
             />
-          )}
-          {!profile.cover_pic && (
+          ) : (
             <div className="w-full h-full bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500" />
           )}
         </div>
@@ -366,26 +376,26 @@ export default function OtherUserProfile() {
             </div>
           </div>
 
-          {/* ACTION BUTTONS */}
+          {/* ACTION BUTTONS - ✨ UPDATED LOGIC */}
           <div className="flex items-center gap-3">
             <button
               onClick={handleMessageClick}
               className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md hover:shadow-lg"
             >
-              {existingConversation ? (
+              {existingConversation?.exists ? (
                 <>
                   <MessageSquare size={20} />
                   Message
                 </>
-              ) : messageRequest?.status === 'pending' ? (
-                <>
-                  <Loader size={20} className="animate-spin" />
-                  Request Sent
-                </>
-              ) : (
+              ) : canSendRequest ? (
                 <>
                   <UserPlus size={20} />
                   Connect
+                </>
+              ) : (
+                <>
+                  <Loader size={20} className="animate-spin" />
+                  Loading...
                 </>
               )}
             </button>
@@ -444,7 +454,6 @@ export default function OtherUserProfile() {
             ) : (
               <div className="grid grid-cols-3 gap-4">
                 {posts.map((post, index) => {
-                  const isLiked = likedPosts.has(post.id);
                   const likeCount = postLikeCounts[post.id] || 0;
                   const commentCount = postCommentCounts[post.id] || 0;
 
@@ -462,7 +471,6 @@ export default function OtherUserProfile() {
                         />
                       </div>
 
-                      {/* Simple overlay showing stats - NO BUTTONS */}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
                         <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between text-white">
                           <div className="flex items-center gap-4">
@@ -472,7 +480,6 @@ export default function OtherUserProfile() {
                         </div>
                       </div>
 
-                      {/* Video badge */}
                       {post.media_type === 'video' && (
                         <div className="absolute top-3 right-3 bg-black/70 text-white px-3 py-1 rounded-full text-xs font-bold">
                           VIDEO
@@ -524,13 +531,14 @@ export default function OtherUserProfile() {
           </div>
         )}
 
-        {/* Message Request Modal */}
+        {/* Message Request Modal - ✨ UPDATED */}
         {messageModalOpen && (
           <MessageRequestModal
             isOpen={messageModalOpen}
             onClose={() => setMessageModalOpen(false)}
             targetUser={profile}
             currentUserId={currentUser?.id}
+            onSuccess={handleRequestSent}
           />
         )}
 
@@ -546,6 +554,7 @@ export default function OtherUserProfile() {
             prev={() => setSelectedPostIndex(Math.max(0, selectedPostIndex - 1))}
             next={() => setSelectedPostIndex(Math.min(posts.length - 1, selectedPostIndex + 1))}
             onPostDeleted={() => loadProfile()}
+            handleShare={handleShare}
           />
         )}
       </div>

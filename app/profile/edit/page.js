@@ -69,6 +69,13 @@ export default function EditProfilePage() {
     "Electronics", "Public Speaking", "Leadership", "Data Science",
     "Machine Learning", "Cloud Computing", "Cybersecurity"
   ];
+  const GENDER_OPTIONS = [
+    { value: "male", label: "Male", emoji: "👨" },
+    { value: "female", label: "Female", emoji: "👩" },
+    { value: "non-binary", label: "Non-Binary", emoji: "🧑" },
+    { value: "other", label: "Other", emoji: "✨" },
+    { value: "prefer-not-to-say", label: "Prefer not to say", emoji: "🔒" }
+  ];
 
   const [user, setUser] = useState(null);
   const [name, setName] = useState("");
@@ -76,6 +83,8 @@ export default function EditProfilePage() {
   const [bio, setBio] = useState("");
   const [skills, setSkills] = useState([]);
   const [interests, setInterests] = useState([]);
+  const [dateOfBirth, setDateOfBirth] = useState("");
+  const [gender, setGender] = useState("");
   const [profilePic, setProfilePic] = useState("");
   const [uploadingImage, setUploadingImage] = useState(false);
 
@@ -142,6 +151,9 @@ export default function EditProfilePage() {
         setState(profileData.state || "");
         setCountry(profileData.country || "");
 
+        // ✅ NEW: Load DOB and Gender
+        setDateOfBirth(profileData.date_of_birth || "");
+        setGender(profileData.gender || "");
       }
 
       // Load user's posts
@@ -153,12 +165,10 @@ export default function EditProfilePage() {
 
       if (postsError) {
         console.error("Error loading posts:", postsError);
-        // Don't throw error, just set empty posts array
         setPosts([]);
       } else if (postsData) {
         setPosts(postsData);
       } else {
-        // Handle case where there's no error but also no data
         setPosts([]);
       }
     } catch (error) {
@@ -260,7 +270,10 @@ export default function EditProfilePage() {
           skills_offered: skills,
           city,
           state,
-          country
+          country,
+          // ✅ NEW: Include DOB and Gender in update
+          date_of_birth: dateOfBirth || null,
+          gender: gender || null
         })
         .eq("id", user.id)
         .select()
@@ -319,7 +332,38 @@ export default function EditProfilePage() {
     // Redirect to interests page with mode=add
     router.push('/onboarding/interests?mode=add');
   };
+  const calculateAge = (dob) => {
+    if (!dob) return null;
+    const birthDate = new Date(dob);
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
 
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+
+    return age;
+  };
+
+  // Get today's date in YYYY-MM-DD format for max date validation
+  const getTodayDate = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Get date 13 years ago (minimum age)
+  const getMinAgeDate = () => {
+    const date = new Date();
+    date.setFullYear(date.getFullYear() - 13);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
   const filteredSkills = SKILL_OPTIONS.filter((sk) =>
     sk.toLowerCase().includes(search.toLowerCase())
   );
@@ -404,9 +448,8 @@ export default function EditProfilePage() {
     sports: '⚽'
   };
 
-  
-    return (
-  <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50 ml-64 pb-20">
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50 ml-64">
       {/* Toast Notification */}
       {toast && (
         <Toast
@@ -568,6 +611,80 @@ export default function EditProfilePage() {
                         <span className="text-xs text-amber-600 font-semibold">Almost at limit!</span>
                       )}
                     </div>
+                  </div>
+                </div>
+
+                {/* Personal Information Section */}
+                <div className="space-y-6 pb-6 border-b border-slate-200">
+                  <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
+                    <User size={20} className="text-indigo-600" />
+                    Personal Information
+                  </h3>
+
+                  {/* Date of Birth */}
+                  <div>
+                    <label className="block font-bold text-slate-800 mb-3 text-sm">Date of Birth</label>
+                    <input
+                      type="date"
+                      value={dateOfBirth}
+                      onChange={(e) => setDateOfBirth(e.target.value)}
+                      max={getMinAgeDate()}
+                      className="w-full p-4 rounded-xl border-2 border-slate-200 bg-white text-slate-900 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 transition-all font-medium"
+                    />
+                    {dateOfBirth && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <div className="px-3 py-1 bg-indigo-50 border border-indigo-200 rounded-lg">
+                          <span className="text-sm text-indigo-700 font-semibold">
+                            Age: {calculateAge(dateOfBirth)} years
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    <p className="text-xs text-slate-600 mt-2 font-medium">
+                      Must be at least 13 years old
+                    </p>
+                  </div>
+
+                  {/* Gender */}
+                  <div>
+                    <label className="block font-bold text-slate-800 mb-3 text-sm">Gender</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {GENDER_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setGender(option.value)}
+                          className={`p-4 rounded-xl border-2 transition-all font-semibold text-left flex items-center gap-3 ${gender === option.value
+                              ? 'bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-500 shadow-lg scale-105'
+                              : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300 hover:shadow-md'
+                            }`}
+                        >
+                          <span className="text-2xl">{option.emoji}</span>
+                          <div className="flex-1">
+                            <span className={`text-sm ${gender === option.value ? 'text-indigo-700' : 'text-slate-700'
+                              }`}>
+                              {option.label}
+                            </span>
+                          </div>
+                          {gender === option.value && (
+                            <div className="w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center">
+                              <Check size={14} className="text-white" strokeWidth={3} />
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Optional: Clear selection button */}
+                    {gender && (
+                      <button
+                        type="button"
+                        onClick={() => setGender("")}
+                        className="mt-3 text-sm text-slate-600 hover:text-slate-800 font-semibold underline"
+                      >
+                        Clear selection
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -913,42 +1030,34 @@ export default function EditProfilePage() {
 
       {/* Add these styles for animations */}
       <style jsx global>{`
-  body {
-    overflow-x: hidden;
-  }
-  
-  * {
-    scroll-behavior: smooth;
-  }
+        @keyframes fade-in {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
 
-  @keyframes fade-in {
-    from {
-      opacity: 0;
-    }
-    to {
-      opacity: 1;
-    }
-  }
-  
-  @keyframes scale-in {
-    from {
-      opacity: 0;
-      transform: scale(0.9);
-    }
-    to {
-      opacity: 1;
-      transform: scale(1);
-    }
-  }
+        @keyframes scale-in {
+          from {
+            opacity: 0;
+            transform: scale(0.9);
+          }
+          to {
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
 
-  .animate-fade-in {
-    animation: fade-in 0.2s ease-out;
-  }
+        .animate-fade-in {
+          animation: fade-in 0.2s ease-out;
+        }
 
-  .animate-scale-in {
-    animation: scale-in 0.3s ease-out;
-  }
-`}</style>
+        .animate-scale-in {
+          animation: scale-in 0.3s ease-out;
+        }
+      `}</style>
     </div>
   );
 }

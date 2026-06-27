@@ -1,10 +1,10 @@
 "use client";
-// app/search/page.js - UPDATED FOR SUPABASE AUTH
+// app/search/page.js - FIXED: Removed gender badge, improved avatar display
 import { useState, useEffect, useCallback } from 'react';
-import { Search, MapPin, Filter, Star, Users, Award, X, SlidersHorizontal, Sparkles, TrendingUp, Heart } from 'lucide-react';
+import { Search, MapPin, Filter, Star, Users, Award, X, SlidersHorizontal, Sparkles } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
-
+import { getAvatarUrl, getAvatarRingColor } from '../utils/avatarUtils';
 
 export default function SearchPage() {
   const router = useRouter();
@@ -33,12 +33,11 @@ export default function SearchPage() {
     'Music', 'Video Editing', 'Yoga', 'Fitness', 'Language Exchange'
   ];
 
-  // ✅ Get current user from Supabase Auth
+  // Get current user from Supabase Auth
   useEffect(() => {
     const fetchCurrentUser = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
-
         if (user) {
           setCurrentUserId(user.id);
         }
@@ -67,7 +66,7 @@ export default function SearchPage() {
     }
   }, []);
 
-  // Search function - now uses profile_user table
+  // Search function
   const searchUsers = useCallback(async () => {
     setLoading(true);
 
@@ -142,8 +141,8 @@ export default function SearchPage() {
         return {
           ...user,
           distance,
-          skill_match_count: 0, // You can implement skill matching logic here
-          swaps: 0, // Add if you have this field
+          skill_match_count: 0,
+          swaps: 0,
           points: user.points || 0
         };
       });
@@ -184,7 +183,7 @@ export default function SearchPage() {
   }, [searchQuery, filters, searchUsers]);
 
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
-    const R = 6371; // Earth's radius in km
+    const R = 6371;
     const dLat = toRadians(lat2 - lat1);
     const dLon = toRadians(lon2 - lon1);
 
@@ -218,14 +217,12 @@ export default function SearchPage() {
       ...prev,
       skills: prev.skills.includes(skill)
         ? prev.skills.filter(s => s !== skill)
-        : [...prev, skill]
+        : [...prev.skills, skill]
     }));
   };
 
   const hasActiveFilters = filters.city || filters.state || filters.country ||
     filters.skills.length > 0 || filters.minRating || filters.maxRating;
-
-  const hasActiveSearch = searchQuery.trim() || hasActiveFilters;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-indigo-50 md:ml-20 lg:ml-64 xl:ml-72">
@@ -252,7 +249,7 @@ export default function SearchPage() {
                 placeholder="Search by name, username, bio, or skills..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-12 pr-4 py-3.5 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all bg-white shadow-sm"
+                className="w-full pl-12 pr-4 py-3.5 border-2 border-gray-200 text-gray-900 placeholder:text-gray-500 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all bg-white shadow-sm"
               />
             </div>
 
@@ -302,21 +299,21 @@ export default function SearchPage() {
                     placeholder="City"
                     value={filters.city}
                     onChange={(e) => setFilters({ ...filters, city: e.target.value })}
-                    className="px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                    className="px-4 py-2.5 border-2 border-gray-200 text-gray-900 placeholder:text-gray-500 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                   />
                   <input
                     type="text"
                     placeholder="State"
                     value={filters.state}
                     onChange={(e) => setFilters({ ...filters, state: e.target.value })}
-                    className="px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                    className="px-4 py-2.5 border-2 border-gray-200 text-gray-900 placeholder:text-gray-500 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                   />
                   <input
                     type="text"
                     placeholder="Country"
                     value={filters.country}
                     onChange={(e) => setFilters({ ...filters, country: e.target.value })}
-                    className="px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                    className="px-4 py-2.5 border-2 border-gray-200 text-gray-900 placeholder:text-gray-500 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                   />
                 </div>
               </div>
@@ -355,7 +352,7 @@ export default function SearchPage() {
                     step="0.1"
                     value={filters.minRating || ''}
                     onChange={(e) => setFilters({ ...filters, minRating: e.target.value ? parseFloat(e.target.value) : null })}
-                    className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 border-2 border-gray-200 text-gray-900 placeholder:text-gray-500 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                   />
                   <input
                     type="number"
@@ -365,7 +362,7 @@ export default function SearchPage() {
                     step="0.1"
                     value={filters.maxRating || ''}
                     onChange={(e) => setFilters({ ...filters, maxRating: e.target.value ? parseFloat(e.target.value) : null })}
-                    className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 border-2 border-gray-200 text-gray-900 placeholder:text-gray-500 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                   />
                 </div>
               </div>
@@ -441,17 +438,24 @@ export default function SearchPage() {
                   <div className="p-6 bg-gradient-to-br from-blue-50 to-indigo-50">
                     <div className="flex items-start gap-4">
                       <div className="relative">
+                        {/* Avatar - removed badge completely */}
                         <img
-                          src={user.profile_pic || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`}
+                          src={getAvatarUrl(user)}
                           alt={user.full_name}
-                          className="w-20 h-20 rounded-2xl object-cover ring-4 ring-white shadow-lg"
+                          className={`w-20 h-20 rounded-2xl object-cover ring-4 ${getAvatarRingColor(user.gender)} shadow-lg transition-all group-hover:scale-110`}
+                          onError={(e) => {
+                            e.target.src = `https://api.dicebear.com/7.x/bottts-neutral/svg?seed=${user.username}`;
+                          }}
                         />
+                        
+                        {/* Top Rated Badge - only this badge remains */}
                         {user.rating >= 4.5 && (
-                          <div className="absolute -top-1 -right-1 bg-gradient-to-r from-yellow-400 to-orange-400 rounded-full p-1">
+                          <div className="absolute -top-1 -left-1 bg-gradient-to-r from-yellow-400 to-orange-400 rounded-full p-1.5 shadow-lg">
                             <Star className="w-4 h-4 text-white fill-white" />
                           </div>
                         )}
                       </div>
+                      
                       <div className="flex-1 min-w-0">
                         <h3 className="font-bold text-gray-800 truncate text-lg">
                           {user.full_name}
@@ -522,7 +526,6 @@ export default function SearchPage() {
                       <p className="text-xs text-gray-500 mt-1 font-medium">Rating</p>
                     </div>
                   </div>
-
 
                   <div className="p-4 bg-gray-50 border-t border-gray-100">
                     <button

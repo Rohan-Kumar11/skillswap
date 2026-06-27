@@ -1,9 +1,20 @@
 import { useState, useRef, useEffect } from 'react';
-import { Play, Volume2, VolumeX, AlertCircle, RefreshCw } from 'lucide-react';
+import { Play, Volume2, VolumeX, AlertCircle } from 'lucide-react';
 
-export default function VideoPlayer({ src, className = "", autoPlay = false, loop = true }) {
+export default function VideoPlayer({ 
+  src, 
+  className = "", 
+  autoPlay = false, 
+  loop = true,
+  onPlayStateChange,
+  musicUrl = null,
+  musicStartTime = 0,
+  musicEndTime = null,
+  musicDuration = 0
+}) {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
+  const audioRef = useRef(null);
   
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
@@ -13,12 +24,160 @@ export default function VideoPlayer({ src, className = "", autoPlay = false, loo
   const [errorDetails, setErrorDetails] = useState(null);
   const [retryCount, setRetryCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  const [videoDuration, setVideoDuration] = useState(0);
   
   const controlsTimeoutRef = useRef(null);
-  const loadAttemptRef = useRef(0);
+  const musicMonitorRef = useRef(null);
   const MAX_RETRIES = 3;
 
   const isValidSource = src && typeof src === 'string' && src.trim() !== '';
+
+  // ✅ Calculate music boundaries as INTEGERS
+  const getMusicBoundaries = () => {
+    // Convert to integers (matching database schema)
+    const start = Math.floor(Number(musicStartTime) || 0);
+    
+    let end;
+    if (musicEndTime !== null && musicEndTime !== undefined) {
+      // Use stored end time from database (INTEGER)
+      end = Math.floor(Number(musicEndTime));
+    } else {
+      // Fallback: calculate from duration
+      const dur = Math.floor(Number(musicDuration) || 15);
+      end = start + dur;
+    }
+    
+    const dur = end - start;
+    
+    console.log('🎵 Music boundaries (INTEGERS):', { 
+      start, 
+      end, 
+      dur,
+      source: musicEndTime ? 'database' : 'calculated'
+    });
+    
+    return { start, end, dur };
+  };
+
+  // Initialize audio
+  useEffect(() => {
+    if (!musicUrl || !musicDuration || musicDuration <= 0) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      return;
+    }
+
+    const audio = new Audio(musicUrl);
+    audio.crossOrigin = 'anonymous';
+    audio.loop = false;
+    audio.preload = 'auto';
+    audioRef.current = audio;
+    
+    const { start, end, dur } = getMusicBoundaries();
+    
+    console.log('🎵 Initializing music clip:', { 
+      musicUrl, 
+      start, 
+      end, 
+      dur,
+      videoDuration 
+    });
+    
+    audio.addEventListener('loadedmetadata', () => {
+      audio.currentTime = start;
+      console.log('✅ Audio positioned at start:', start);
+    });
+    
+    audio.addEventListener('ended', () => {
+      if (isPlaying) {
+        console.log('🔄 Audio ended naturally, restarting from:', start);
+        audio.currentTime = start;
+        audio.play().catch(err => console.log('Audio play error:', err));
+      }
+    });
+    
+    return () => {
+      if (musicMonitorRef.current) {
+        clearInterval(musicMonitorRef.current);
+        musicMonitorRef.current = null;
+      }
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, [musicUrl, musicStartTime, musicEndTime, musicDuration]);
+
+  // ✅ Monitor music playback and enforce boundaries
+  useEffect(() => {
+    if (!audioRef.current || !isPlaying || !musicUrl) {
+      if (musicMonitorRef.current) {
+        clearInterval(musicMonitorRef.current);
+        musicMonitorRef.current = null;
+      }
+      return;
+    }
+
+    const { start, end, dur } = getMusicBoundaries();
+    
+    console.log('🎬 Starting music monitor:', { start, end, dur });
+    
+    // Check music position every 50ms
+    musicMonitorRef.current = setInterval(() => {
+      const audio = audioRef.current;
+      if (!audio || audio.paused) return;
+      
+      const current = audio.currentTime;
+      
+      // ✅ If we've passed the end time OR gone before start, loop back
+      if (current >= end || current < start) {
+        console.log(`🔄 Music loop trigger: current=${current.toFixed(2)}s, resetting to ${start}s`);
+        audio.currentTime = start;
+        
+        // Ensure it keeps playing
+        if (isPlaying) {
+          audio.play().catch(err => console.log('Loop play error:', err));
+        }
+      }
+    }, 50); // Check every 50ms for smooth looping
+
+    return () => {
+      if (musicMonitorRef.current) {
+        clearInterval(musicMonitorRef.current);
+        musicMonitorRef.current = null;
+      }
+    };
+  }, [isPlaying, musicUrl, musicStartTime, musicEndTime, musicDuration]);
+
+  // Sync play/pause between video and audio
+  useEffect(() => {
+    if (!audioRef.current) return;
+
+    if (isPlaying) {
+      const { start } = getMusicBoundaries();
+      
+      // Ensure we're at the correct start position
+      if (audioRef.current.currentTime < start) {
+        audioRef.current.currentTime = start;
+      }
+      
+      audioRef.current.play()
+        .then(() => console.log('✅ Music playing'))
+        .catch(err => console.log('Music play error:', err));
+    } else {
+      audioRef.current.pause();
+      console.log('⏸️ Music paused');
+    }
+  }, [isPlaying, musicStartTime]);
+
+  // Notify parent of play state changes
+  useEffect(() => {
+    if (onPlayStateChange) {
+      onPlayStateChange(isPlaying);
+    }
+  }, [isPlaying, onPlayStateChange]);
 
   const resetControlsTimeout = () => {
     if (controlsTimeoutRef.current) {
@@ -40,6 +199,9 @@ export default function VideoPlayer({ src, className = "", autoPlay = false, loo
       videoRef.current?.pause();
       setIsPlaying(false);
       setShowControls(true);
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
     } else {
       videoRef.current?.play()
         .then(() => {
@@ -63,13 +225,12 @@ export default function VideoPlayer({ src, className = "", autoPlay = false, loo
   };
 
   const handleCanPlay = () => {
-    console.log('✅ Video ready to play:', src);
+    console.log('✅ Video ready');
     setIsReady(true);
     setHasError(false);
     setErrorDetails(null);
     setRetryCount(0);
     setIsLoading(false);
-    loadAttemptRef.current = 0;
     
     if (autoPlay && videoRef.current) {
       videoRef.current.play()
@@ -78,160 +239,116 @@ export default function VideoPlayer({ src, className = "", autoPlay = false, loo
     }
   };
 
-  const handleLoadStart = () => {
-    console.log('🔄 Video loading started:', src);
-    setIsLoading(true);
-  };
-
   const handleLoadedMetadata = () => {
-    console.log('📊 Video metadata loaded');
+    if (videoRef.current) {
+      const duration = videoRef.current.duration;
+      setVideoDuration(duration);
+      console.log('📹 Video duration:', duration, 's');
+      
+      // Log sync info
+      if (musicUrl) {
+        const { start, end, dur } = getMusicBoundaries();
+        console.log('🎵 Music vs Video:', {
+          video: duration,
+          music: dur,
+          synced: Math.abs(duration - dur) < 1
+        });
+      }
+    }
   };
 
-  const handleLoadedData = () => {
-    console.log('📦 Video data loaded');
+  const handleLoadStart = () => {
+    setIsLoading(true);
   };
 
   const handleError = (e) => {
     const video = videoRef.current;
     const error = video?.error;
     
-    console.error('❌ Video Error Details:', {
-      errorObject: error,
-      errorCode: error?.code,
-      errorMessage: error?.message,
-      videoSrc: src,
-      videoReadyState: video?.readyState,
-      videoNetworkState: video?.networkState,
-      eventType: e?.type,
-      loadAttempt: loadAttemptRef.current + 1
-    });
+    console.error('❌ Video Error:', error);
 
     let errorMessage = 'Unable to load video';
     let errorCode = 'UNKNOWN';
-    let suggestion = 'Please check the video URL and try again';
     
     if (error) {
       switch (error.code) {
-        case 1: // MEDIA_ERR_ABORTED
-          errorMessage = 'Video loading was aborted';
-          errorCode = 'ABORTED';
-          suggestion = 'The video loading was interrupted. Please try again.';
-          break;
-        case 2: // MEDIA_ERR_NETWORK
-          errorMessage = 'Network error occurred';
-          errorCode = 'NETWORK_ERROR';
-          suggestion = 'Check your internet connection and try again.';
-          break;
-        case 3: // MEDIA_ERR_DECODE
-          errorMessage = 'Video format not supported';
-          errorCode = 'DECODE_ERROR';
-          suggestion = 'Your browser cannot decode this video format.';
-          break;
-        case 4: // MEDIA_ERR_SRC_NOT_SUPPORTED
-          errorMessage = 'Video source not accessible';
-          errorCode = 'SOURCE_NOT_SUPPORTED';
-          suggestion = 'The video URL may be invalid or blocked by CORS/permissions.';
-          break;
+        case 1: errorMessage = 'Video loading aborted'; errorCode = 'ABORTED'; break;
+        case 2: errorMessage = 'Network error'; errorCode = 'NETWORK'; break;
+        case 3: errorMessage = 'Format not supported'; errorCode = 'DECODE'; break;
+        case 4: errorMessage = 'Source not accessible'; errorCode = 'NOT_FOUND'; break;
       }
-    } else {
-      // No error object means likely a CORS or 406 issue
-      errorMessage = 'Video access denied';
-      errorCode = 'ACCESS_DENIED';
-      suggestion = 'Storage permissions may be incorrect. Check Supabase RLS policies.';
     }
 
-    setErrorDetails({ 
-      code: errorCode, 
-      message: errorMessage, 
-      suggestion,
-      url: src 
-    });
+    setErrorDetails({ code: errorCode, message: errorMessage });
     setHasError(true);
     setIsReady(false);
     setIsPlaying(false);
     setIsLoading(false);
-    
-    loadAttemptRef.current += 1;
   };
 
   const handleRetry = async () => {
-    if (retryCount >= MAX_RETRIES) {
-      console.log('❌ Max retries reached');
-      return;
-    }
+    if (retryCount >= MAX_RETRIES) return;
 
-    console.log(`🔄 Retrying video load (attempt ${retryCount + 1}/${MAX_RETRIES})`);
-    
     setHasError(false);
     setErrorDetails(null);
     setIsReady(false);
     setIsLoading(true);
     setRetryCount(prev => prev + 1);
     
-    // Small delay before retry
     await new Promise(resolve => setTimeout(resolve, 500));
     
-    // Force reload
     if (videoRef.current) {
       videoRef.current.load();
     }
   };
 
-  // Test video URL accessibility
-  useEffect(() => {
-    if (!isValidSource) return;
-
-    console.log('🔍 Testing video URL accessibility:', src);
-    
-    fetch(src, { 
-      method: 'HEAD',
-      mode: 'cors',
-    })
-      .then(response => {
-        console.log('✅ Video URL test response:', {
-          status: response.status,
-          statusText: response.statusText,
-          contentType: response.headers.get('content-type'),
-          contentLength: response.headers.get('content-length'),
-          cors: response.headers.get('access-control-allow-origin'),
-        });
-        
-        if (response.status === 406) {
-          console.error('⚠️ 406 Error: Server rejected the request. Check Supabase storage policies!');
-        } else if (response.status === 403) {
-          console.error('⚠️ 403 Error: Access forbidden. Check authentication and RLS policies!');
-        } else if (response.status === 404) {
-          console.error('⚠️ 404 Error: Video not found at this URL!');
-        } else if (!response.ok) {
-          console.error(`⚠️ ${response.status} Error: ${response.statusText}`);
-        }
-      })
-      .catch(error => {
-        console.error('❌ Video URL test failed:', {
-          error: error.message,
-          type: error.name,
-          suggestion: 'This might be a CORS issue. Check Supabase storage CORS settings.'
-        });
-      });
-  }, [src, isValidSource]);
-
   const handleEnded = () => {
+    console.log('🔄 Video ended');
+    
     if (!loop) {
       setIsPlaying(false);
       setShowControls(true);
+      
+      // Stop and reset music
+      if (audioRef.current) {
+        const { start } = getMusicBoundaries();
+        audioRef.current.pause();
+        audioRef.current.currentTime = start;
+        console.log('⏹️ Music stopped and reset to:', start);
+      }
+    } else {
+      // Video is looping - reset music to sync
+      if (audioRef.current && isPlaying) {
+        const { start } = getMusicBoundaries();
+        console.log('🔄 Video loop - resetting music to:', start);
+        audioRef.current.currentTime = start;
+        audioRef.current.play().catch(err => console.log('Loop play error:', err));
+      }
     }
   };
 
+  const handlePause = () => {
+    setIsPlaying(false);
+  };
+
+  const handlePlay = () => {
+    setIsPlaying(true);
+  };
+
+  // Cleanup
   useEffect(() => {
     return () => {
-      if (controlsTimeoutRef.current) {
-        clearTimeout(controlsTimeoutRef.current);
+      if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+      if (musicMonitorRef.current) clearInterval(musicMonitorRef.current);
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
       }
     };
   }, []);
 
+  // Reset on source change
   useEffect(() => {
-    console.log('🔄 Video source changed:', src);
     setIsPlaying(false);
     setIsReady(false);
     setHasError(false);
@@ -239,11 +356,24 @@ export default function VideoPlayer({ src, className = "", autoPlay = false, loo
     setShowControls(true);
     setRetryCount(0);
     setIsLoading(true);
-    loadAttemptRef.current = 0;
+    
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    if (musicMonitorRef.current) {
+      clearInterval(musicMonitorRef.current);
+      musicMonitorRef.current = null;
+    }
   }, [src]);
 
   useEffect(() => {
-    resetControlsTimeout();
+    if (isPlaying) {
+      resetControlsTimeout();
+    } else {
+      if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+      setShowControls(true);
+    }
   }, [isPlaying]);
 
   if (!isValidSource) {
@@ -251,7 +381,7 @@ export default function VideoPlayer({ src, className = "", autoPlay = false, loo
       <div className={`relative bg-black flex items-center justify-center ${className}`}>
         <div className="text-white text-center p-6">
           <AlertCircle size={48} className="mx-auto mb-3 text-gray-500" />
-          <p className="text-sm text-gray-400">No video source provided</p>
+          <p className="text-sm text-gray-400">No video source</p>
         </div>
       </div>
     );
@@ -265,119 +395,73 @@ export default function VideoPlayer({ src, className = "", autoPlay = false, loo
       onMouseMove={resetControlsTimeout}
       onMouseEnter={() => setShowControls(true)}
     >
-       <video
+      <video
         ref={videoRef}
         src={src}
         className="w-full h-full object-contain"
-        onLoadStart={handleLoadStart}
-        onLoadedMetadata={handleLoadedMetadata}
-        onLoadedData={handleLoadedData}
         onCanPlay={handleCanPlay}
+        onLoadedMetadata={handleLoadedMetadata}
+        onLoadStart={handleLoadStart}
         onError={handleError}
         onEnded={handleEnded}
+        onPause={handlePause}
+        onPlay={handlePlay}
         loop={loop}
         playsInline
         muted={isMuted}
-        preload="auto"
+        preload="metadata"
         crossOrigin="anonymous"
-        controlsList="nodownload"
       />
 
-      {/* Loading State */}
       {isLoading && !hasError && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+        <div className="absolute inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm">
           <div className="text-center">
             <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin mx-auto mb-3" />
-            <p className="text-white text-sm">Loading video...</p>
-            {retryCount > 0 && (
-              <p className="text-gray-400 text-xs mt-1">Retry attempt {retryCount}/{MAX_RETRIES}</p>
-            )}
+            <p className="text-white text-sm font-medium">Loading...</p>
           </div>
         </div>
       )}
 
-      {/* Error State */}
       {hasError && (
         <div className="absolute inset-0 flex items-center justify-center bg-black">
-          <div className="text-white text-center p-6 max-w-md mx-auto">
-            <AlertCircle size={56} className="mx-auto mb-4 text-red-500" />
-            <p className="text-lg font-semibold mb-2">Unable to play video</p>
-            <p className="text-sm text-gray-300 mb-2">
-              {errorDetails?.message || 'The video could not be loaded'}
-            </p>
-            <p className="text-xs text-gray-400 mb-4">
-              {errorDetails?.suggestion || 'Please try again'}
-            </p>
-            
+          <div className="text-white text-center p-6 max-w-md">
+            <AlertCircle size={48} className="mx-auto mb-3 text-red-500" />
+            <p className="text-base font-semibold mb-2">Can't play video</p>
+            <p className="text-sm text-gray-400 mb-4">{errorDetails?.message}</p>
             {retryCount < MAX_RETRIES && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   handleRetry();
                 }}
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-sm font-medium mb-4"
+                className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm font-medium"
               >
-                <RefreshCw size={16} />
-                <span>Retry ({MAX_RETRIES - retryCount} left)</span>
+                Retry
               </button>
             )}
-            
-            {retryCount >= MAX_RETRIES && (
-              <div className="text-xs text-gray-500 mb-4">
-                <p className="mb-2">Still having issues? Try these steps:</p>
-                <ul className="text-left space-y-1 max-w-xs mx-auto">
-                  <li>• Check Supabase storage RLS policies</li>
-                  <li>• Verify bucket is set to PUBLIC</li>
-                  <li>• Clear browser cache and reload</li>
-                  <li>• Try a different browser</li>
-                </ul>
-              </div>
-            )}
-            
-            <div className="mt-4 pt-4 border-t border-gray-700">
-              <p className="text-xs text-gray-500 font-mono mb-1">Error: {errorDetails?.code}</p>
-              <p className="text-xs text-gray-600 break-all">{src}</p>
-            </div>
           </div>
         </div>
       )}
 
-      {/* Center Play Button */}
       {!isPlaying && isReady && !hasError && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="w-16 h-16 rounded-full bg-white/90 backdrop-blur-sm flex items-center justify-center shadow-2xl animate-pulse">
-            <Play size={32} className="text-black ml-1" fill="black" />
+          <div className="w-20 h-20 rounded-full bg-white/95 flex items-center justify-center shadow-2xl">
+            <Play size={36} className="text-black ml-1" fill="black" />
           </div>
         </div>
       )}
 
-      {/* Volume Control */}
       {isReady && !hasError && (
         <button
           onClick={handleMuteToggle}
-          className={`absolute top-4 right-4 w-10 h-10 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center transition-all duration-300 z-10 hover:bg-black/80 ${
+          className={`absolute top-4 right-4 w-10 h-10 rounded-full bg-black/60 flex items-center justify-center z-10 hover:bg-black/80 transition-all ${
             showControls ? 'opacity-100' : 'opacity-0'
           }`}
         >
-          {isMuted ? (
-            <VolumeX size={20} className="text-white" />
-          ) : (
-            <Volume2 size={20} className="text-white" />
-          )}
+          {isMuted ? <VolumeX size={20} className="text-white" /> : <Volume2 size={20} className="text-white" />}
         </button>
       )}
 
-      {/* Pause Indicator */}
-      {!isPlaying && isReady && !hasError && showControls && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
-          <div className="flex gap-2">
-            <div className="w-1.5 h-12 bg-white rounded-full opacity-90"></div>
-            <div className="w-1.5 h-12 bg-white rounded-full opacity-90"></div>
-          </div>
-        </div>
-      )}
-
-      {/* Gradient Overlays */}
       <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-black/40 to-transparent pointer-events-none" />
       <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-black/40 to-transparent pointer-events-none" />
     </div>

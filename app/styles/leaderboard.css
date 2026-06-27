@@ -1,0 +1,132 @@
+/* styles/leaderboard.css */
+
+/* Fade in animation */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.5s ease-out forwards;
+}
+
+/* Slide up animation */
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.6s ease-out;
+}
+
+/* Scale in animation */
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-scale-in {
+  animation: scale-in 0.4s ease-out;
+}
+
+/* Bounce animation for crown */
+@keyframes bounce-slow {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.animate-bounce {
+  animation: bounce-slow 2s ease-in-out infinite;
+}
+
+/* Custom scrollbar for dark theme */
+::-webkit-scrollbar {
+  width: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f172a;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(to bottom, #10b981, #06b6d4);
+  border-radius: 10px;
+  border: 2px solid #0f172a;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(to bottom, #059669, #0891b2);
+}
+
+/* Glow effect classes */
+.glow-gold {
+  box-shadow: 0 0 20px rgba(250, 204, 21, 0.4),
+              0 0 40px rgba(250, 204, 21, 0.2);
+}
+
+.glow-silver {
+  box-shadow: 0 0 20px rgba(203, 213, 225, 0.4),
+              0 0 40px rgba(203, 213, 225, 0.2);
+}
+
+.glow-bronze {
+  box-shadow: 0 0 20px rgba(251, 146, 60, 0.4),
+              0 0 40px rgba(251, 146, 60, 0.2);
+}
+
+/* Gradient text utilities */
+.text-gradient-gold {
+  background: linear-gradient(to right, #fbbf24, #f59e0b);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.text-gradient-silver {
+  background: linear-gradient(to right, #cbd5e1, #94a3b8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.text-gradient-bronze {
+  background: linear-gradient(to right, #fb923c, #f97316);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Backdrop blur fix for Firefox */
+@supports not (backdrop-filter: blur(10px)) {
+  .backdrop-blur-sm {
+    background-color: rgba(30, 41, 59, 0.9);
+  }
+  
+  .backdrop-blur-xl {
+    background-color: rgba(30, 41, 59, 0.95);
+  }
+}

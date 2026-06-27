@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Play, Pause, X, Check, SkipBack, SkipForward, ArrowLeft } from 'lucide-react';
 
-export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, onBack }) {
+export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, onBack, videoDuration }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -13,13 +13,27 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
   const audioRef = useRef(null);
   const timeUpdateIntervalRef = useRef(null);
 
+  // ✅ Calculate min and max based on video duration
+  const getMinClipDuration = () => {
+    if (videoDuration && videoDuration > 0) {
+      return Math.min(15, Math.floor(videoDuration));
+    }
+    return 15;
+  };
+
+  const getMaxClipDuration = () => {
+    if (videoDuration && videoDuration > 0) {
+      return Math.min(30, Math.floor(videoDuration));
+    }
+    return 30;
+  };
+
   // Initialize audio and load metadata
   useEffect(() => {
     if (isOpen && musicData?.preview) {
       setIsLoading(true);
       setLoadError(null);
-      
-      // Clean up previous audio
+
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.src = '';
@@ -27,16 +41,23 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
 
       const audio = new Audio();
       audioRef.current = audio;
-
-      // Set CORS mode
       audio.crossOrigin = 'anonymous';
       audio.preload = 'metadata';
 
       const handleLoadedMetadata = () => {
         const audioDuration = audio.duration;
         console.log('✅ Audio loaded, duration:', audioDuration);
+        console.log('📹 Video duration:', videoDuration);
+
         setDuration(audioDuration);
-        setClipDuration(15);
+
+        const minClip = getMinClipDuration();
+        const maxClip = getMaxClipDuration();
+        const initialClip = Math.min(maxClip, Math.max(minClip, Math.floor(videoDuration) || 15));
+
+        console.log('🎵 Min clip:', minClip, 'Max clip:', maxClip, 'Initial:', initialClip);
+
+        setClipDuration(initialClip);
         setStartTime(0);
         setCurrentTime(0);
         setIsLoading(false);
@@ -58,7 +79,7 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
           errorCode: audio.error?.code,
           errorMessage: audio.error?.message
         });
-        
+
         let errorMsg = 'Failed to load audio';
         if (audio.error) {
           switch (audio.error.code) {
@@ -68,7 +89,7 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
             case 4: errorMsg = 'Audio source not found'; break;
           }
         }
-        
+
         setLoadError(errorMsg);
         setIsLoading(false);
       };
@@ -77,7 +98,6 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
       audio.addEventListener('ended', handleEnded);
       audio.addEventListener('error', handleError);
 
-      // Set source and load
       console.log('🔄 Loading audio from:', musicData.preview);
       audio.src = musicData.preview;
       audio.load();
@@ -95,7 +115,7 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
         }
       };
     }
-  }, [isOpen, musicData]);
+  }, [isOpen, musicData, videoDuration]);
 
   // Handle playback monitoring
   useEffect(() => {
@@ -108,7 +128,7 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
         if (audioRef.current) {
           const time = audioRef.current.currentTime;
           setCurrentTime(time);
-          
+
           if (time >= startTime + clipDuration) {
             audioRef.current.pause();
             audioRef.current.currentTime = startTime;
@@ -153,15 +173,19 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
   const handleStartTimeChange = (e) => {
     const value = parseFloat(e.target.value);
     const newStartTime = Math.max(0, Math.min(value, duration));
-    
+
+    const minClip = getMinClipDuration();
+    const maxClip = getMaxClipDuration();
     const remainingDuration = duration - newStartTime;
-    if (clipDuration > remainingDuration) {
-      const adjustedClipDuration = Math.max(15, Math.min(30, Math.floor(remainingDuration)));
+    const maxPossibleClip = Math.min(maxClip, remainingDuration);
+
+    if (clipDuration > maxPossibleClip) {
+      const adjustedClipDuration = Math.max(minClip, Math.min(maxClip, Math.floor(maxPossibleClip)));
       setClipDuration(adjustedClipDuration);
     }
-    
+
     setStartTime(newStartTime);
-    
+
     if (audioRef.current && !isPlaying) {
       audioRef.current.currentTime = newStartTime;
       setCurrentTime(newStartTime);
@@ -170,23 +194,29 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
 
   const handleClipDurationChange = (e) => {
     const value = parseInt(e.target.value);
+    const minClip = getMinClipDuration();
+    const maxClip = getMaxClipDuration();
     const remainingAudio = duration - startTime;
-    const maxPossibleClip = Math.floor(Math.min(30, remainingAudio));
-    const newDuration = Math.max(15, Math.min(value, maxPossibleClip));
-    
+    const maxPossibleClip = Math.floor(Math.min(maxClip, remainingAudio));
+    const newDuration = Math.max(minClip, Math.min(value, maxPossibleClip));
+
     setClipDuration(newDuration);
   };
 
   const skipBackward = () => {
     const newTime = Math.max(0, startTime - 5);
     setStartTime(newTime);
-    
+
+    const minClip = getMinClipDuration();
+    const maxClip = getMaxClipDuration();
     const remainingDuration = duration - newTime;
-    if (clipDuration > remainingDuration) {
-      const adjustedClipDuration = Math.max(15, Math.min(30, Math.floor(remainingDuration)));
+    const maxPossibleClip = Math.min(maxClip, remainingDuration);
+
+    if (clipDuration > maxPossibleClip) {
+      const adjustedClipDuration = Math.max(minClip, Math.min(maxClip, Math.floor(maxPossibleClip)));
       setClipDuration(adjustedClipDuration);
     }
-    
+
     if (audioRef.current) {
       audioRef.current.currentTime = newTime;
       setCurrentTime(newTime);
@@ -194,15 +224,20 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
   };
 
   const skipForward = () => {
-    const newTime = Math.min(duration - 15, startTime + 5);
+    const minClip = getMinClipDuration();
+    const maxClip = getMaxClipDuration();
+    const minRequiredTime = Math.max(minClip, maxClip);
+    const newTime = Math.min(duration - minRequiredTime, startTime + 5);
     setStartTime(newTime);
-    
+
     const remainingDuration = duration - newTime;
-    if (clipDuration > remainingDuration) {
-      const adjustedClipDuration = Math.max(15, Math.min(30, Math.floor(remainingDuration)));
+    const maxPossibleClip = Math.min(maxClip, remainingDuration);
+
+    if (clipDuration > maxPossibleClip) {
+      const adjustedClipDuration = Math.max(minClip, Math.min(maxClip, Math.floor(maxPossibleClip)));
       setClipDuration(adjustedClipDuration);
     }
-    
+
     if (audioRef.current) {
       audioRef.current.currentTime = newTime;
       setCurrentTime(newTime);
@@ -217,12 +252,42 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
       clearInterval(timeUpdateIntervalRef.current);
     }
     setIsPlaying(false);
-    
+
+    // ✅ CRITICAL FIX: Convert to INTEGER for database
+    const finalStartTime = Math.floor(Number(startTime) || 0);
+    const finalClipDuration = Math.floor(Number(clipDuration) || 15);
+    const finalEndTime = finalStartTime + finalClipDuration;
+
+    // ✅ Validate they're actually numbers
+    if (!Number.isFinite(finalStartTime) || finalStartTime < 0) {
+      console.error('❌ Invalid start time:', finalStartTime);
+      alert('Invalid start time. Please try again.');
+      return;
+    }
+
+    if (!Number.isFinite(finalClipDuration) || finalClipDuration <= 0) {
+      console.error('❌ Invalid duration:', finalClipDuration);
+      alert('Invalid duration. Please try again.');
+      return;
+    }
+
+    console.log('✅ Confirming music selection (INTEGERS):', {
+      startTime: finalStartTime,
+      clipDuration: finalClipDuration,
+      endTime: finalEndTime,
+      types: {
+        startTime: typeof finalStartTime,
+        clipDuration: typeof finalClipDuration,
+        endTime: typeof finalEndTime
+      }
+    });
+
     onConfirm({
       ...musicData,
-      startTime,
-      clipDuration,
-      endTime: startTime + clipDuration
+      startTime: finalStartTime, // INTEGER
+      clipDuration: finalClipDuration, // INTEGER
+      duration: finalClipDuration, // INTEGER
+      endTime: finalEndTime // INTEGER - CRITICAL FOR SYNC
     });
   };
 
@@ -245,7 +310,7 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
       clearInterval(timeUpdateIntervalRef.current);
     }
     setIsPlaying(false);
-    
+
     if (onBack) {
       onBack();
     } else {
@@ -266,14 +331,16 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
     return Math.max(0, Math.min(100, progress));
   };
 
-  const maxStartTime = Math.max(0, duration - 15);
+  const minClip = getMinClipDuration();
+  const maxClip = getMaxClipDuration();
+  const maxStartTime = Math.max(0, duration - minClip);
   const remainingFromStart = duration - startTime;
-  const maxClipDuration = Math.floor(Math.min(30, remainingFromStart));
+  const maxClipDuration = Math.floor(Math.min(maxClip, remainingFromStart));
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
-        
+
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-pink-50 flex-shrink-0">
           <div className="flex items-center gap-3">
@@ -296,7 +363,7 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
 
         {/* Content */}
         <div className="p-6 space-y-6 overflow-y-auto flex-1">
-          
+
           {/* Music Info */}
           <div className="flex items-center gap-4 p-4 bg-gradient-to-br from-purple-50 to-pink-50 rounded-2xl">
             <img
@@ -311,6 +378,11 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
               <p className="text-xs text-purple-600 font-semibold mt-1">
                 Full length: {formatTime(duration)}
               </p>
+              {videoDuration && videoDuration > 0 && (
+                <p className="text-xs text-pink-600 font-semibold">
+                  Video: {formatTime(videoDuration)} • Clip: {minClip}s - {maxClip}s
+                </p>
+              )}
             </div>
           </div>
 
@@ -345,7 +417,7 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
                   >
                     <SkipBack size={20} className="text-gray-700" />
                   </button>
-                  
+
                   <button
                     onClick={togglePlay}
                     disabled={isLoading}
@@ -357,7 +429,7 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
                       <Play size={28} className="text-white ml-1" fill="white" />
                     )}
                   </button>
-                  
+
                   <button
                     onClick={skipForward}
                     disabled={startTime >= maxStartTime}
@@ -417,7 +489,12 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
                   <div className="flex justify-between items-center mb-3">
                     <div>
                       <span className="text-sm font-semibold text-gray-700">Clip Length</span>
-                      <p className="text-xs text-gray-500 mt-0.5">15-30 seconds</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {videoDuration && videoDuration > 0
+                          ? `${minClip}s - ${maxClip}s (matches video)`
+                          : '15-30 seconds'
+                        }
+                      </p>
                     </div>
                     <span className="text-sm font-bold text-pink-600 bg-pink-100 px-3 py-1 rounded-lg">
                       {clipDuration}s
@@ -425,7 +502,7 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
                   </div>
                   <input
                     type="range"
-                    min="15"
+                    min={minClip}
                     max={maxClipDuration}
                     step="1"
                     value={clipDuration}
@@ -433,8 +510,8 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
                     className="w-full h-3 bg-gray-200 rounded-full appearance-none cursor-pointer slider-pink"
                   />
                   <div className="flex justify-between text-xs text-gray-400 mt-2">
-                    <span>15s</span>
-                    <span>{Math.min(30, maxClipDuration)}s max</span>
+                    <span>{minClip}s min</span>
+                    <span>{Math.min(maxClip, maxClipDuration)}s max</span>
                   </div>
                 </label>
               </div>
@@ -449,6 +526,11 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
                   <p className="text-sm text-pink-600 font-semibold mt-1">
                     {clipDuration} seconds from this song
                   </p>
+                  {videoDuration && videoDuration > 0 && clipDuration === Math.floor(videoDuration) && (
+                    <p className="text-xs text-green-600 font-semibold mt-2 flex items-center justify-center gap-1">
+                      <span>✓</span> Perfect sync with video
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -461,7 +543,12 @@ export default function AudioTrimmer({ isOpen, onClose, musicData, onConfirm, on
                 <span>•</span>
                 <div className="flex items-center gap-1">
                   <div className="w-2 h-2 rounded-full bg-pink-600"></div>
-                  <span>15-30s clips</span>
+                  <span>
+                    {videoDuration && videoDuration > 0
+                      ? `${minClip}s - ${maxClip}s`
+                      : '15-30s clips'
+                    }
+                  </span>
                 </div>
               </div>
             </>

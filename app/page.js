@@ -1,8 +1,11 @@
 "use client";
 // app/page.js - FIXED SESSION HANDLING
 
+"use client";
+// app/page.js - PART 1: Imports and Setup
+
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
 export default function SkillSwapLanding() {
@@ -10,6 +13,7 @@ export default function SkillSwapLanding() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   useEffect(() => {
     const handleMouseMove = (e) => {
@@ -19,13 +23,34 @@ export default function SkillSwapLanding() {
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
+  // PART 2: Main useEffect - THIS IS THE KEY FIX!
+  // PART 2: Main useEffect - COMPLETE FIX
   useEffect(() => {
+    // ✅ CHECK IF COMING FROM "ADD ANOTHER ACCOUNT"
+    const isAddingAccount = searchParams.get('action') === 'add-account';
+
+    if (isAddingAccount) {
+      console.log('➕ Add account mode - skipping auth check');
+      setCheckingAuth(false);
+      setAuthModalOpen(true);
+      // Don't set up auth listener when adding account
+      return;
+    }
+
     checkAuth();
 
-    // Listen for auth state changes
+    // Listen for auth state changes ONLY if not adding account
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('🔄 Auth state changed:', event);
+
+        // Ignore SIGNED_OUT events when we're in add-account mode
+        const currentlyAddingAccount = window.location.search.includes('action=add-account');
+
+        if (currentlyAddingAccount && event === 'SIGNED_OUT') {
+          console.log('⏭️ Ignoring SIGNED_OUT during add account flow');
+          return;
+        }
 
         if (event === 'SIGNED_IN' && session) {
           console.log('✅ User signed in:', session.user.id);
@@ -39,8 +64,8 @@ export default function SkillSwapLanding() {
     return () => {
       subscription.unsubscribe();
     };
-  }, [router]);
-
+  }, [router, searchParams]);
+  // PART 3: Auth Functions
   const checkAuth = async () => {
     try {
       setCheckingAuth(true);
@@ -66,8 +91,12 @@ export default function SkillSwapLanding() {
     }
   };
 
+  // REPLACE the handleAuthSuccess function (around line 100-125) with this:
+
   const handleAuthSuccess = async (session) => {
     try {
+      console.log('🔍 Checking profile for user:', session.user.id);
+
       // Check if profile exists
       const { data: profile, error: profileError } = await supabase
         .from('profile_user')
@@ -80,12 +109,18 @@ export default function SkillSwapLanding() {
         throw profileError;
       }
 
+      // Close modal first - FIXED
+      setAuthModalOpen(false);
+
+      // Small delay before navigation
+      await new Promise(resolve => setTimeout(resolve, 300));
+
       if (profile) {
         console.log('✅ Profile exists, redirecting to profile');
-        router.push('/profile');
+        window.location.href = '/profile';
       } else {
         console.log('📝 No profile, redirecting to onboarding');
-        router.push('/onboarding/interests?mode=new');
+        window.location.href = '/onboarding/interests?mode=new';
       }
     } catch (error) {
       console.error('❌ Error in handleAuthSuccess:', error);
@@ -101,6 +136,7 @@ export default function SkillSwapLanding() {
     // Navigation will be handled by auth state listener
   };
 
+  // PART 4: Loading and JSX
   if (checkingAuth) {
     return (
       <div className="flex items-center justify-center h-screen bg-black">
@@ -158,7 +194,7 @@ export default function SkillSwapLanding() {
   );
 }
 
-// ... rest of your components (Header, BackgroundEffects, HeroSection, etc.) stay the same
+// PART 5: Components - Header, Background, Hero
 
 function Header({ onAuthClick }) {
   return (
@@ -242,6 +278,8 @@ function HeroSection({ onGetStarted }) {
     </section>
   );
 }
+
+// PART 6: Features, How It Works, Testimonials
 
 function FeaturesSection() {
   const features = [
@@ -340,6 +378,8 @@ function TestimonialsSection() {
   );
 }
 
+// PART 7: CTA and Footer
+
 function CTASection({ onGetStarted }) {
   return (
     <section className="relative z-10 py-32 px-6">
@@ -386,7 +426,7 @@ function Footer() {
   );
 }
 
-// UPDATED AUTH MODAL - Replace your AuthModal function with this
+// PART 8: AuthModal - Setup
 
 function AuthModal({ isOpen, onClose, onSuccess }) {
   const [isLogin, setIsLogin] = useState(true);
@@ -394,6 +434,21 @@ function AuthModal({ isOpen, onClose, onSuccess }) {
   const [error, setError] = useState('');
   const [showEmailConfirmation, setShowEmailConfirmation] = useState(false);
   const [confirmationEmail, setConfirmationEmail] = useState('');
+
+  // NEW: Password visibility states
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  // NEW: Forgot password states
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [showOtpInput, setShowOtpInput] = useState(false);
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [otp, setOtp] = useState(['', '', '', '', '', '']); // Array for 6 digits
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+
   const [formData, setFormData] = useState({
     full_name: '',
     username: '',
@@ -407,23 +462,184 @@ function AuthModal({ isOpen, onClose, onSuccess }) {
     setFormData({ ...formData, [e.target.name]: e.target.value });
     setError('');
   };
-  useEffect(() => {
-  if (!isOpen) {
-    // Reset all modal states when it closes
-    setShowEmailConfirmation(false);
-    setConfirmationEmail('');
+  // Handle OTP input change
+  const handleOtpChange = (index, value) => {
+    if (!/^\d*$/.test(value)) return; // Only allow numbers
+
+    const newOtp = [...otp];
+    newOtp[index] = value;
+    setOtp(newOtp);
     setError('');
-    setLoading(false);
-    setFormData({
-      full_name: '',
-      username: '',
-      email: '',
-      mobile: '',
-      password: '',
-      confirmPassword: ''
+
+    // Auto-focus next input
+    if (value && index < 5) {
+      document.getElementById(`otp-${index + 1}`)?.focus();
+    }
+  };
+
+  // Handle OTP backspace
+  const handleOtpKeyDown = (index, e) => {
+    if (e.key === 'Backspace' && !otp[index] && index > 0) {
+      document.getElementById(`otp-${index - 1}`)?.focus();
+    }
+  };
+
+  // Handle paste in OTP
+  const handleOtpPaste = (e) => {
+    e.preventDefault();
+    const pastedData = e.clipboardData.getData('text').slice(0, 6);
+    if (!/^\d+$/.test(pastedData)) return;
+
+    const newOtp = [...otp];
+    pastedData.split('').forEach((char, idx) => {
+      if (idx < 6) newOtp[idx] = char;
     });
-  }
-}, [isOpen]);
+    setOtp(newOtp);
+  };
+  // ADD these functions inside AuthModal (after handleChange, before handleSubmit):
+
+  // Send OTP to email
+  // Send OTP to email
+  const handleForgotPassword = async () => {
+    if (!resetEmail) {
+      setError('Please enter your email address');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      // Supabase sends OTP via email
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        resetEmail.trim().toLowerCase()
+      );
+
+      if (error) throw error;
+
+      console.log('✅ Password reset OTP sent to email');
+      setShowOtpInput(true);
+      setShowForgotPassword(false);
+    } catch (err) {
+      console.error('❌ Forgot password error:', err);
+      setError(err.message || 'Failed to send reset code. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Verify OTP and show reset password form
+  // Verify OTP code
+  const handleVerifyOtp = async () => {
+    const otpCode = otp.join('');
+
+    if (otpCode.length !== 6) {
+      setError('Please enter the complete 6-digit code');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      // Verify OTP with Supabase
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: resetEmail.trim().toLowerCase(),
+        token: otpCode,
+        type: 'recovery'
+      });
+
+      if (error) throw error;
+
+      console.log('✅ OTP verified successfully');
+      setShowOtpInput(false);
+      setShowResetPassword(true);
+    } catch (err) {
+      console.error('❌ OTP verification error:', err);
+      setError('Invalid or expired code. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Reset password
+  const handleResetPassword = async () => {
+    if (!newPassword || !confirmNewPassword) {
+      setError('Please fill in all fields');
+      return;
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword
+      });
+
+      if (error) throw error;
+
+      console.log('✅ Password reset successful');
+
+      // Reset states and show login
+      setShowResetPassword(false);
+      setResetEmail('');
+      setOtp(['', '', '', '', '', '']);
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setIsLogin(true);
+      setError('');
+
+      // Show success message
+      alert('Password reset successful! Please login with your new password.');
+    } catch (err) {
+      console.error('❌ Password reset error:', err);
+      setError(err.message || 'Failed to reset password. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isOpen) {
+      // Reset all states when modal closes
+      setShowEmailConfirmation(false);
+      setConfirmationEmail('');
+      setError('');
+      setLoading(false);
+      setShowPassword(false);
+      setShowConfirmPassword(false);
+      setShowForgotPassword(false);
+      setShowOtpInput(false);
+      setShowResetPassword(false);
+      setResetEmail('');
+      setOtp(['', '', '', '', '', '']);
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setShowNewPassword(false);
+      setFormData({
+        full_name: '',
+        username: '',
+        email: '',
+        mobile: '',
+        password: '',
+        confirmPassword: ''
+      });
+    }
+  }, [isOpen]);
+
+
+  // PART 9: AuthModal - handleSubmit
 
   const handleSubmit = async () => {
     setLoading(true);
@@ -431,9 +647,8 @@ function AuthModal({ isOpen, onClose, onSuccess }) {
 
     try {
       if (isLogin) {
-        // ✅ LOGIN
         console.log('🔐 Attempting login...');
-        
+
         const { data, error: authError } = await supabase.auth.signInWithPassword({
           email: formData.email.trim().toLowerCase(),
           password: formData.password
@@ -441,13 +656,13 @@ function AuthModal({ isOpen, onClose, onSuccess }) {
 
         if (authError) {
           console.error('❌ Login error:', authError);
-          
+
           if (authError.message.includes('Invalid login credentials')) {
             throw new Error('Incorrect email or password. Please try again.');
           } else if (authError.message.includes('Email not confirmed')) {
             throw new Error('Please confirm your email before logging in. Check your inbox.');
           }
-          
+
           throw authError;
         }
 
@@ -456,22 +671,28 @@ function AuthModal({ isOpen, onClose, onSuccess }) {
         }
 
         console.log('✅ Login successful');
-        
-        // Check if profile exists
+
+        // Close modal immediately
+        onClose();  // ✅ FIXED: Use onClose() instead of setAuthModalOpen(false)
+
+        // Check profile and redirect
         const { data: profile } = await supabase
           .from('profile_user')
           .select('*')
           .eq('id', data.user.id)
           .maybeSingle();
 
-        // Success - let auth state listener handle navigation
-        onSuccess(!profile);
-        
+        // Direct navigation without waiting for auth listener
+        setTimeout(() => {
+          if (profile) {
+            window.location.href = '/profile';
+          } else {
+            window.location.href = '/onboarding/interests?mode=new';
+          }
+        }, 500);
       } else {
-        // ✅ SIGNUP
         console.log('📝 Attempting signup...');
-        
-        // Validation
+
         if (!formData.full_name || !formData.username || !formData.email || !formData.password) {
           throw new Error('Please fill in all required fields');
         }
@@ -487,7 +708,6 @@ function AuthModal({ isOpen, onClose, onSuccess }) {
         const cleanEmail = formData.email.trim().toLowerCase();
         const cleanUsername = formData.username.trim().toLowerCase().replace(/\s/g, '');
 
-        // Check if username exists
         const { data: existingUser } = await supabase
           .from('profile_user')
           .select('username')
@@ -500,7 +720,6 @@ function AuthModal({ isOpen, onClose, onSuccess }) {
 
         console.log('✅ Username available, creating account...');
 
-        // Sign up with email confirmation enabled
         const { data, error: authError } = await supabase.auth.signUp({
           email: cleanEmail,
           password: formData.password,
@@ -516,17 +735,16 @@ function AuthModal({ isOpen, onClose, onSuccess }) {
 
         if (authError) {
           console.error('❌ Signup error:', authError);
-          
+
           if (authError.message.includes('already registered')) {
             throw new Error('This email is already registered. Please login instead.');
           }
-          
+
           throw authError;
         }
 
         console.log('✅ Signup response:', data);
 
-        // Check if email confirmation is required
         if (data.user && !data.session) {
           console.log('📧 Email confirmation required');
           setConfirmationEmail(cleanEmail);
@@ -534,7 +752,6 @@ function AuthModal({ isOpen, onClose, onSuccess }) {
           return;
         }
 
-        // If auto-confirmed (shouldn't happen with email confirmation enabled)
         if (data.user && data.session) {
           console.log('✅ User auto-confirmed');
           onSuccess(true);
@@ -549,8 +766,246 @@ function AuthModal({ isOpen, onClose, onSuccess }) {
   };
 
   if (!isOpen) return null;
+  // ADD these screens BEFORE the regular auth form in AuthModal (after "if (!isOpen) return null;"):
 
-  // Email confirmation screen
+  // Forgot Password - Email Input Screen
+  if (showForgotPassword) {
+    return (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/80 backdrop-blur-xl" onClick={() => setShowForgotPassword(false)} />
+
+        <div className="relative w-full max-w-md bg-gradient-to-br from-gray-900 via-purple-900/20 to-gray-900 rounded-3xl p-8 border border-purple-500/30">
+          <button
+            onClick={() => setShowForgotPassword(false)}
+            className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white text-2xl"
+          >
+            ×
+          </button>
+
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan-500 to-purple-500 mb-4">
+              <span className="text-3xl">🔐</span>
+            </div>
+            <h2 className="text-3xl font-black bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent mb-2">
+              Reset Password
+            </h2>
+            <p className="text-gray-400 text-sm">
+              Enter your email to receive a reset link
+            </p>
+          </div>
+
+          {error && (
+            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+              {error}
+            </div>
+          )}
+
+          <input
+            type="email"
+            value={resetEmail}
+            onChange={(e) => {
+              setResetEmail(e.target.value);
+              setError('');
+            }}
+            onKeyPress={(e) => e.key === 'Enter' && handleForgotPassword()}
+            placeholder="Enter your email"
+            className="w-full px-4 py-3 mb-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+          />
+
+          <button
+            onClick={handleForgotPassword}
+            disabled={loading}
+            className="w-full py-3 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-xl font-bold text-white hover:shadow-lg hover:shadow-purple-500/50 transition-all disabled:opacity-50"
+          >
+            {loading ? 'Sending...' : 'Send Reset Link'}
+          </button>
+
+          <button
+            onClick={() => setShowForgotPassword(false)}
+            className="w-full mt-3 py-3 text-gray-400 hover:text-white transition-colors"
+          >
+            Back to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // OTP Input Screen
+  // OTP Input Screen
+  if (showOtpInput) {
+    return (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/80 backdrop-blur-xl" />
+
+        <div className="relative w-full max-w-md bg-gradient-to-br from-gray-900 via-purple-900/20 to-gray-900 rounded-3xl p-8 border border-purple-500/30">
+          <button
+            onClick={() => {
+              setShowOtpInput(false);
+              setShowForgotPassword(true);
+              setOtp(['', '', '', '', '', '']);
+            }}
+            className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white text-2xl"
+          >
+            ×
+          </button>
+
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan-500 to-purple-500 mb-4">
+              <span className="text-3xl">📧</span>
+            </div>
+            <h2 className="text-3xl font-black bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent mb-2">
+              Enter Verification Code
+            </h2>
+            <p className="text-gray-400 text-sm mb-2">
+              We sent a 6-digit code to:
+            </p>
+            <p className="text-cyan-400 font-semibold text-sm mb-6">
+              {resetEmail}
+            </p>
+          </div>
+
+          {error && (
+            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+              {error}
+            </div>
+          )}
+
+          {/* OTP Input Boxes */}
+          <div className="flex gap-2 justify-center mb-6" onPaste={handleOtpPaste}>
+            {otp.map((digit, index) => (
+              <input
+                key={index}
+                id={`otp-${index}`}
+                type="text"
+                inputMode="numeric"
+                maxLength={1}
+                value={digit}
+                onChange={(e) => handleOtpChange(index, e.target.value)}
+                onKeyDown={(e) => handleOtpKeyDown(index, e)}
+                className="w-12 h-14 text-center text-2xl font-bold bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+              />
+            ))}
+          </div>
+
+          <button
+            onClick={handleVerifyOtp}
+            disabled={loading || otp.join('').length !== 6}
+            className="w-full py-3 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-xl font-bold text-white hover:shadow-lg hover:shadow-purple-500/50 transition-all disabled:opacity-50"
+          >
+            {loading ? 'Verifying...' : 'Verify Code'}
+          </button>
+
+          <div className="mt-4 text-center">
+            <button
+              onClick={handleForgotPassword}
+              disabled={loading}
+              className="text-sm text-gray-400 hover:text-white transition-colors"
+            >
+              {loading ? 'Sending...' : "Didn't receive code? Resend"}
+            </button>
+          </div>
+
+          <button
+            onClick={() => {
+              setShowOtpInput(false);
+              setShowForgotPassword(true);
+              setOtp(['', '', '', '', '', '']);
+            }}
+            className="w-full mt-3 py-3 text-gray-400 hover:text-white transition-colors text-sm"
+          >
+            Back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Reset Password Screen
+  if (showResetPassword) {
+    return (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/80 backdrop-blur-xl" />
+
+        <div className="relative w-full max-w-md bg-gradient-to-br from-gray-900 via-purple-900/20 to-gray-900 rounded-3xl p-8 border border-purple-500/30">
+          <button
+            onClick={() => {
+              setShowResetPassword(false);
+              setShowForgotPassword(false);
+            }}
+            className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white text-2xl"
+          >
+            ×
+          </button>
+
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan-500 to-purple-500 mb-4">
+              <span className="text-3xl">🔑</span>
+            </div>
+            <h2 className="text-3xl font-black bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent mb-2">
+              Create New Password
+            </h2>
+            <p className="text-gray-400 text-sm">
+              Enter your new password
+            </p>
+          </div>
+
+          {error && (
+            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+              {error}
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <div className="relative">
+              <input
+                type={showNewPassword ? "text" : "password"}
+                value={newPassword}
+                onChange={(e) => {
+                  setNewPassword(e.target.value);
+                  setError('');
+                }}
+                placeholder="New Password"
+                className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+              <button
+                type="button"
+                onClick={() => setShowNewPassword(!showNewPassword)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+              >
+                {showNewPassword ? '👁️' : '👁️‍🗨️'}
+              </button>
+            </div>
+
+            <div className="relative">
+              <input
+                type={showNewPassword ? "text" : "password"}
+                value={confirmNewPassword}
+                onChange={(e) => {
+                  setConfirmNewPassword(e.target.value);
+                  setError('');
+                }}
+                onKeyPress={(e) => e.key === 'Enter' && handleResetPassword()}
+                placeholder="Confirm New Password"
+                className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+            </div>
+
+            <button
+              onClick={handleResetPassword}
+              disabled={loading}
+              className="w-full py-3 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-xl font-bold text-white hover:shadow-lg hover:shadow-purple-500/50 transition-all disabled:opacity-50"
+            >
+              {loading ? 'Resetting...' : 'Reset Password'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // PART 10: AuthModal - Email Confirmation Screen
+
   if (showEmailConfirmation) {
     return (
       <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -627,9 +1082,8 @@ function AuthModal({ isOpen, onClose, onSuccess }) {
               setIsLogin(true);
               setError('');
             }}
-            className={`flex-1 px-6 py-2 rounded-full font-semibold transition-all ${
-              isLogin ? 'bg-gradient-to-r from-cyan-500 to-purple-500 text-white' : 'text-gray-400'
-            }`}
+            className={`flex-1 px-6 py-2 rounded-full font-semibold transition-all ${isLogin ? 'bg-gradient-to-r from-cyan-500 to-purple-500 text-white' : 'text-gray-400'
+              }`}
           >
             Login
           </button>
@@ -638,9 +1092,8 @@ function AuthModal({ isOpen, onClose, onSuccess }) {
               setIsLogin(false);
               setError('');
             }}
-            className={`flex-1 px-6 py-2 rounded-full font-semibold transition-all ${
-              !isLogin ? 'bg-gradient-to-r from-cyan-500 to-purple-500 text-white' : 'text-gray-400'
-            }`}
+            className={`flex-1 px-6 py-2 rounded-full font-semibold transition-all ${!isLogin ? 'bg-gradient-to-r from-cyan-500 to-purple-500 text-white' : 'text-gray-400'
+              }`}
           >
             Sign Up
           </button>
@@ -698,28 +1151,81 @@ function AuthModal({ isOpen, onClose, onSuccess }) {
             />
           )}
 
-          <input
-            type="password"
-            name="password"
-            value={formData.password}
-            onChange={handleChange}
-            onKeyPress={(e) => e.key === 'Enter' && handleSubmit()}
-            placeholder="Password *"
-            required
-            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
-          />
 
-          {!isLogin && (
+
+          {/* Password with Eye Icon */}
+          <div className="relative">
             <input
-              type="password"
-              name="confirmPassword"
-              value={formData.confirmPassword}
+              type={showPassword ? "text" : "password"}
+              name="password"
+              value={formData.password}
               onChange={handleChange}
               onKeyPress={(e) => e.key === 'Enter' && handleSubmit()}
-              placeholder="Confirm Password *"
+              placeholder="Password *"
               required
-              className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
             />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+            >
+              {showPassword ? (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+              )}
+            </button>
+          </div>
+
+          {/* Confirm Password with Eye Icon - Only for Sign Up */}
+          {!isLogin && (
+            <div className="relative">
+              <input
+                type={showConfirmPassword ? "text" : "password"}
+                name="confirmPassword"
+                value={formData.confirmPassword}
+                onChange={handleChange}
+                onKeyPress={(e) => e.key === 'Enter' && handleSubmit()}
+                placeholder="Confirm Password *"
+                required
+                className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+              >
+                {showConfirmPassword ? (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                )}
+              </button>
+            </div>
+          )}
+
+          {/* Forgot Password Link - Only show on login */}
+          {isLogin && (
+            <div className="text-right">
+              <button
+                type="button"
+                onClick={() => setShowForgotPassword(true)}
+                className="text-sm text-cyan-400 hover:text-cyan-300 transition-colors"
+              >
+                Forgot Password?
+              </button>
+            </div>
           )}
 
           <button

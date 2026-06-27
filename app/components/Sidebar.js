@@ -7,7 +7,7 @@ import {
   Search,
   MessageSquare,
   Compass,
-  Repeat,
+  Trophy,
   Bell,
   User,
   MoreHorizontal,
@@ -16,10 +16,9 @@ import {
   HelpCircle,
   Shield,
   Palette,
-  Moon,
-  Sun,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
+import { getAvatarUrl, getAvatarDescription } from "../utils/avatarUtils";
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -27,6 +26,8 @@ export default function Sidebar() {
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [darkMode, setDarkMode] = useState(true);
+  const [currentUser, setCurrentUser] = useState(null);
+
   const moreMenuRef = useRef(null);
 
   const navLinks = [
@@ -34,7 +35,7 @@ export default function Sidebar() {
     { href: "/search", icon: Search, label: "Search" },
     { href: "/messages", icon: MessageSquare, label: "Messages" },
     { href: "/explore", icon: Compass, label: "Explore" },
-    { href: "/swap", icon: Repeat, label: "Swap" },
+    { href: "/leaderboard", icon: Trophy, label: "Leaderboard" },
     { href: "/notification", icon: Bell, label: "Notification" },
   ];
 
@@ -46,7 +47,10 @@ export default function Sidebar() {
     { icon: LogOut, label: "Log Out", action: "logout", color: "from-red-500 to-pink-500" },
   ];
 
-  // Close menu when clicking outside
+  useEffect(() => {
+    loadCurrentUser();
+  }, []);
+
   useEffect(() => {
     function handleClickOutside(event) {
       if (moreMenuRef.current && !moreMenuRef.current.contains(event.target)) {
@@ -62,6 +66,27 @@ export default function Sidebar() {
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [showMoreMenu]);
+
+  const loadCurrentUser = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        const { data: profile } = await supabase
+          .from("profile_user")
+          .select("*")
+          .eq("id", session.user.id)
+          .single();
+
+        setCurrentUser({
+          id: session.user.id,
+          email: session.user.email,
+          profile: profile
+        });
+      }
+    } catch (error) {
+      console.error("Error loading current user:", error);
+    }
+  };
 
   const handleMoreClick = () => {
     setShowMoreMenu(!showMoreMenu);
@@ -82,7 +107,6 @@ export default function Sidebar() {
         break;
       case "appearance":
         setDarkMode(!darkMode);
-        // You can implement theme switching logic here
         break;
       case "help":
         router.push("/help");
@@ -107,7 +131,7 @@ export default function Sidebar() {
 
       console.log("✅ Logged out successfully");
       setShowMoreMenu(false);
-      router.push("/");
+      window.location.href = "/";
     } catch (error) {
       console.error("❌ Logout failed:", error);
       alert("Failed to log out. Please try again.");
@@ -118,7 +142,6 @@ export default function Sidebar() {
 
   return (
     <aside className="w-64 h-screen bg-[#0a1123] text-white p-6 fixed left-0 top-0 flex flex-col justify-between z-50 shadow-2xl">
-      
       {/* TOP SECTION */}
       <div>
         <Link href="/home" className="block mb-8 group">
@@ -131,7 +154,7 @@ export default function Sidebar() {
           {navLinks.map((link) => {
             const Icon = link.icon;
             const isActive = pathname === link.href || pathname.startsWith(link.href + '/');
-            
+
             return (
               <Link
                 key={link.href}
@@ -151,68 +174,77 @@ export default function Sidebar() {
       </div>
 
       {/* BOTTOM SECTION */}
-      <div className="space-y-2 pb-4 border-t border-gray-800 pt-4 relative" ref={moreMenuRef}>
+      <div className="space-y-2 pb-4 border-t border-gray-800 pt-4">
         {/* Profile Link */}
         <Link
           href="/profile"
-          className={`flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-200 group ${
+          className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${
             pathname === "/profile" || pathname.startsWith('/profile/')
               ? 'bg-gradient-to-r from-pink-600/20 via-purple-600/20 to-blue-600/20 text-white font-semibold shadow-lg'
               : 'text-gray-400 hover:text-white hover:bg-white/5'
           }`}
         >
-          <User size={22} className="group-hover:scale-110 transition-transform" />
-          <span>Profile</span>
+          <img
+            src={getAvatarUrl(currentUser?.profile)}
+            alt={getAvatarDescription(currentUser?.profile)}
+            className="w-8 h-8 rounded-full object-cover border-2 border-purple-500"
+          />
+          <div className="flex-1 text-left">
+            <p className="text-sm font-semibold truncate">
+              {currentUser?.profile?.username || 'Profile'}
+            </p>
+          </div>
         </Link>
 
         {/* More Button */}
-        <button
-          onClick={handleMoreClick}
-          className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-200 group ${
-            showMoreMenu
-              ? 'bg-gradient-to-r from-pink-600/20 via-purple-600/20 to-blue-600/20 text-white font-semibold shadow-lg'
-              : 'text-gray-400 hover:text-white hover:bg-white/5'
-          }`}
-        >
-          <MoreHorizontal size={22} className="group-hover:scale-110 transition-transform" />
-          <span>More</span>
-        </button>
+        <div className="relative" ref={moreMenuRef}>
+          <button
+            onClick={handleMoreClick}
+            className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-200 group ${
+              showMoreMenu
+                ? 'bg-gradient-to-r from-pink-600/20 via-purple-600/20 to-blue-600/20 text-white font-semibold shadow-lg'
+                : 'text-gray-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <MoreHorizontal size={22} className="group-hover:scale-110 transition-transform" />
+            <span>More</span>
+          </button>
 
-        {/* More Menu Popup */}
-        {showMoreMenu && (
-          <div className="absolute bottom-full left-0 right-0 mb-2 bg-[#0f1829] rounded-2xl shadow-2xl border border-gray-800/50 overflow-hidden backdrop-blur-xl animate-in slide-in-from-bottom-2 duration-200">
-            {moreMenuItems.map((item, index) => {
-              const Icon = item.icon;
-              const isLogout = item.action === "logout";
-              
-              return (
-                <button
-                  key={item.action}
-                  onClick={() => handleMenuAction(item.action)}
-                  disabled={isLogout && loggingOut}
-                  className={`w-full flex items-center gap-4 px-4 py-3 transition-all duration-200 group hover:bg-white/5 ${
-                    index !== moreMenuItems.length - 1 ? 'border-b border-gray-800/50' : ''
-                  } ${isLogout && loggingOut ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  <div className={`p-2 rounded-lg bg-gradient-to-br ${item.color} bg-opacity-10`}>
-                    <Icon 
-                      size={18} 
-                      className={`group-hover:scale-110 transition-transform ${
-                        isLogout && loggingOut ? 'animate-spin' : ''
-                      }`}
-                    />
-                  </div>
-                  <span className="text-sm font-medium text-gray-300 group-hover:text-white">
-                    {isLogout && loggingOut ? 'Logging out...' : item.label}
-                  </span>
-                </button>
-              );
-            })}
-            
-            {/* Decorative bottom gradient */}
-            <div className="h-1 bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500" />
-          </div>
-        )}
+          {/* More Menu Popup */}
+          {showMoreMenu && (
+            <div className="absolute bottom-full left-0 right-0 mb-2 bg-[#0f1829] rounded-2xl shadow-2xl border border-gray-800/50 overflow-hidden backdrop-blur-xl animate-in slide-in-from-bottom-2 duration-200">
+              {moreMenuItems.map((item, index) => {
+                const Icon = item.icon;
+                const isLogout = item.action === "logout";
+
+                return (
+                  <button
+                    key={item.action}
+                    onClick={() => handleMenuAction(item.action)}
+                    disabled={isLogout && loggingOut}
+                    className={`w-full flex items-center gap-4 px-4 py-3 transition-all duration-200 group hover:bg-white/5 ${
+                      index !== moreMenuItems.length - 1 ? 'border-b border-gray-800/50' : ''
+                    } ${isLogout && loggingOut ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    <div className={`p-2 rounded-lg bg-gradient-to-br ${item.color} bg-opacity-10`}>
+                      <Icon
+                        size={18}
+                        className={`group-hover:scale-110 transition-transform ${
+                          isLogout && loggingOut ? 'animate-spin' : ''
+                        }`}
+                      />
+                    </div>
+                    <span className="text-sm font-medium text-gray-300 group-hover:text-white">
+                      {isLogout && loggingOut ? 'Logging out...' : item.label}
+                    </span>
+                  </button>
+                );
+              })}
+
+              <div className="h-1 bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500" />
+            </div>
+          )}
+        </div>
       </div>
     </aside>
   );
